@@ -10,6 +10,8 @@
  * See Google Docs: "Project: Aiko: Stream protocol specification"
  * Currently requires an Aiko-Gateway.
  * ----------------------------------------------------------------------------
+ * This version is by @samotage and has specific mods as necessary for Smart Energy Groups 
+ * energy measurement.
  *
  * Third-Party libraries
  * ~~~~~~~~~~~~~~~~~~~~~
@@ -55,8 +57,8 @@
 using namespace Aiko;
 
 //#define IS_GATEWAY
-#define IS_PEBBLE
-//#define IS_STONE
+//#define IS_PEBBLE
+#define IS_STONE
 
 #ifdef IS_GATEWAY
 #define DEFAULT_NODE_NAME "gateway_1"
@@ -75,7 +77,6 @@ using namespace Aiko;
 #endif
 
 #ifdef IS_STONE
-thetemple
 #define DEFAULT_NODE_NAME "power_box_1"
 //#define DEFAULT_NODE_NAME "sam_pebble_1"
 #endif
@@ -158,7 +159,10 @@ void setup() {
   Events.addHandler(serialHandler, 30);  // Sufficient for 38,400 baud
   Events.addHandler(blinkHandler,          1000 * TRANSMIT_PERIOD);
   Events.addHandler(nodeHandler,           1000 * TRANSMIT_PERIOD);
+
+#ifdef IS_PEBBLE
   Events.addHandler(voltageSensorHandler,  1000 * TRANSMIT_PERIOD);
+#endif
 
 #ifdef HAS_LCD
   Events.addHandler(clockHandler,  1000);
@@ -212,6 +216,7 @@ void blinkHandler(void) {
 
 /* -------------------------------------------------------------------------- */
 
+#ifdef IS_PEBBLE
 float voltageRaw = 0;
 float voltageValue = 0;
 
@@ -231,6 +236,7 @@ void voltageSensorHandler(void) {
   sendMessage(globalString);
       
 }
+#endif
 
 
 /* -------------------------------------------------------------------------- */
@@ -272,6 +278,8 @@ void inductiveSensorHandler(void) {
   float rms_val1 = 0;
   float rms_val2 = 0;
   float rms_val3 = 0;
+  
+  float average_rms1 = 0; 
  
   while (reading_cnt <= SAMPLE_COUNT) {
     
@@ -316,11 +324,11 @@ void inductiveSensorHandler(void) {
       // cater for the rollover of arduino clock
       
       if (totalTime > 0) {
-        float average_rms1 = (total_rms1 / SAMPLE_COUNT) * 36;
+        average_rms1 = (total_rms1 / SAMPLE_COUNT) * 36;
       }
       else {
         // Had a rollover, in this case, just set as zero...
-        float average_rms1 = 0;        
+        average_rms1 = 0;        
       }
       
       // The wattz and watt hourz
