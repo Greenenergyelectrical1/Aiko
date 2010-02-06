@@ -1,7 +1,7 @@
 /*
 **  A very simple thing for geting the analog data from the 'drino
 */
-#define S1_PIN 3    // pin for the analog data input
+#define S1_PIN 2    // pin for the analog data input
 
 #define SAMPLES 300 // number of samples to take
 
