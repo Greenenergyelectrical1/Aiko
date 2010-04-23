@@ -18,6 +18,7 @@
 -- ~~~~~~~~~~~~~~~~~~
 -- - Put protocol version into boot message to Aiko-Node and web service.
 -- - Verify protocol version in the Aiko-Node boot message.
+--   - Send tweet to owner, if newer software versions are available.
 
 -- - Re-open serial network port 2000, if it closes.
 -- - Listen on socket for commands to Aiko-Gateway.
@@ -219,6 +220,9 @@ function custom_sink()
   end
 end
 
+function WaitLoop(milliseconds)
+   
+end
 -- ------------------------------------------------------------------------- --
 
 function send_message(message)
@@ -290,13 +294,98 @@ function send_message(message)
       if (command) then
         if (debug) then print("-- send message(): command: ", command) end
         serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+        serial_client:send(command .. ";\n")
+
+      
       end
     end
 
     if (response == "(status okay)") then
       if (debug) then print("-- send_message(): status: okay") end
     else
-      print("Error: HTTP response: ", response)
+      print("HTTP response: ", response)
     end
   end
 
@@ -317,8 +406,26 @@ end
 function send_event_heartbeat(node_name)
   if (debug) then print("-- send_event_heartbeat(): " .. node_name) end
 
-  message = "(cpu_usage 5 %) (node_count 1 number)"
+  message = "(cpu_usage 0 %) (node_count 1 number)"
   send_message(wrap_message(message, node_name))
+end
+
+-- ------------------------------------------------------------------------- --
+
+function heartbeat_handler()
+  local throttle_counter = 1 -- Always start with a heartbeat
+
+  while (true) do
+    throttle_counter = throttle_counter - 1
+
+    if (throttle_counter <= 0) then
+      throttle_counter = heartbeat_rate
+
+      send_event_heartbeat(aiko_gateway_name)
+    end
+
+    coroutine.yield()
+  end
 end
 
 -- ------------------------------------------------------------------------- --
@@ -347,10 +454,18 @@ end
 -- ------------------------------------------------------------------------- --
 
 function serial_handler()
+
+  if (debug) then
+    print("About to establish ser2net connection...") 
+  end
   serial_client = socket.connect(aiko_gateway_address, 2000)
   serial_client:settimeout(serial_timeout_period)  -- 0 --> non-blocking read
 
 --serial_client:send("")
+
+  if (debug) then
+    print("Got ser2net connection, and continuing") 
+  end
 
   local stream, status, partial
 
@@ -430,6 +545,7 @@ function parse_message(buffer)
               if (debug) then print("-- parse_message(): event: ", message) end
 
               send_message(wrap_message(message, node_name))
+           
             else
               print("-- parse_message(): ERROR: Problem after the node name")
             end
@@ -644,7 +760,7 @@ end
 
 -- ------------------------------------------------------------------------- --
 
-print("[Aiko-Gateway V0.2 2009-11-20]");
+print("[Aiko-Gateway V0.2 2009-12-24]");
 
 if (not is_production()) then require("luarocks.require") end
 require("socket")
@@ -661,8 +777,7 @@ initialize()
 -- TODO: Keep retrying boot message until success (OpenWRT boot sequence issue)
   send_event_boot(aiko_gateway_name)
 
--- TODO: Create co-routine to periodically send heartbeat.
-  send_event_heartbeat(aiko_gateway_name)
+coroutine_heartbeat = coroutine.create(heartbeat_handler)
 
 -- TODO: Handle incorrect serial host_name, e.g. not localhost -> fail !
 coroutine_serial = coroutine.create(serial_handler)
@@ -670,6 +785,9 @@ coroutine_serial = coroutine.create(serial_handler)
 if (twitter_flag) then coroutine_twitter = coroutine.create(twitter_query) end
 
 while (coroutine.status(coroutine_serial)) ~= "dead" do
+  if (debug) then print("-- coroutine.resume(coroutine_heartbeat):") end
+  coroutine.resume(coroutine_heartbeat)
+
   if (debug) then print("-- coroutine.resume(coroutine_serial):") end
   coroutine.resume(coroutine_serial)
 
