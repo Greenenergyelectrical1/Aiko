@@ -72,8 +72,8 @@ using namespace Aiko;
 #define NOT_SLEEPY
 
 //To use or not use the Aiko events system
-#define IS_AIKO
-//#define NOT_AIKO
+//#define IS_AIKO
+#define NOT_AIKO
 
 //#define HAS_SERIAL_MIRROR
 
@@ -107,10 +107,10 @@ using namespace Aiko;
 #define SINGLE_PHASE
 //#define SUM_CHANNELS
 
-#define CHANNELS          1   // Current Clamp(s)
-#define SAMPLES        2000   // Current samples to take
-#define AVERAGES         30   // Number of RMS values to average
-#define CYCLES            1   // Number of times to cycle through the calculations
+#define CHANNELS          6   // Current Clamp(s)
+#define SAMPLES        1500   // Current samples to take
+#define AVERAGES          5   // Number of RMS values to average
+#define CYCLES            3   // Number of times to cycle through the calculations
 
 #define DEFAULT_BAUD_RATE     38400
 #define ONE_SHOT_TIME         180000
@@ -1111,7 +1111,6 @@ void serialMirrorHandler(void) {
     }
 }
 #endif
-
 
 
 
