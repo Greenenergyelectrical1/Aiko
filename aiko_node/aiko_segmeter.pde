@@ -1,4 +1,4 @@
-/* aiko_node.pde
+/* aiko_segmeter.pde
  * ~~~~~~~~~~~~~
  * Please do not remove the following notices.
  * Copyright (c) 2009 by Geekscape Pty. Ltd.
@@ -10,6 +10,28 @@
  * See Google Docs: "Project: Aiko: Stream protocol specification"
  * Currently requires an Aiko-Gateway.
  * ----------------------------------------------------------------------------
+ *
+ * Usage and configuration for smartenergygroups.com, SEG
+ * ~~~~~~~~~~~~~~~~~~~~~
+ * There are lots of things in here, and here are some basics.
+ * If you can get through all this, you may well disover some new functions, and
+ * you may even implement some of your own!  So Rock on!
+ *
+ * 1. Set the default node name, unique for your user id in SEG
+ * 2. Make sure either single phase or multi phase is selected (one or the other commented out)
+ * 3. Select the number of channels
+ * 4. Adjust samples, averages and cycles to an appropriate setting.
+ * 5. Decide whether to use the Aiko Events system or not.
+ * 6. Go to the method segMeterInitialise and setup some stuff:
+ *    - Sensor type on each channel
+ *    - Primary turns on each channel (default is 1)
+ * 
+ * 7. If you have any Q's on this, pop me a note here:
+ *    Twitter: @samotage
+ *    Message: https://smartenergygroups.com/questions/ask
+ *
+ * Good luck!  
+ * Sam.
  *
  * Third-Party libraries
  * ~~~~~~~~~~~~~~~~~~~~~
@@ -77,9 +99,22 @@ using namespace Aiko;
 
 //#define HAS_SERIAL_MIRROR
 
-#define DEFAULT_NODE_NAME "seg_meter_10"
+#define DEFAULT_NODE_NAME "power_board"
 #define DEFAULT_TRANSMIT_RATE    15  // seconds
 //#define STONE_DEBUG  // Enable capture and dump of all sampled values
+
+//#define MULTI_PHASE
+#define SINGLE_PHASE
+//#define SUM_CHANNELS
+
+#define CHANNELS          1   // Current Clamp(s)
+#define SAMPLES        2000   // Current samples to take
+#define AVERAGES          5   // Number of RMS values to average
+#define CYCLES            5   // Number of times to cycle through the calculations
+
+#define DEFAULT_BAUD_RATE     38400
+#define ONE_SHOT_TIME         180000
+#define QUICK_FLASH_TIME      20
 
 // Sensor Types
 #define SENSOR_CSLT 1
@@ -103,18 +138,6 @@ using namespace Aiko;
 //#define CALIBRATION  33.333  // 10 mV per Amp, 1 turn, analog reference = internal (1 VDC)
 //#define CALIBRATION   144.45  // 10 mV per Amp, analog reference = default  (5 VDC)
 
-//#define MULTI_PHASE
-#define SINGLE_PHASE
-//#define SUM_CHANNELS
-
-#define CHANNELS          6   // Current Clamp(s)
-#define SAMPLES        1500   // Current samples to take
-#define AVERAGES          5   // Number of RMS values to average
-#define CYCLES            3   // Number of times to cycle through the calculations
-
-#define DEFAULT_BAUD_RATE     38400
-#define ONE_SHOT_TIME         180000
-#define QUICK_FLASH_TIME      20
 
 // Digital Input/Output pins
 #define PIN_SERIAL_RX       0
@@ -192,16 +215,17 @@ void setup() {
 
 #ifdef IS_AIKO
     // handlers set to 1 milisecond to use sleep mode
-    Events.addHandler(serialHandler,      10); // Sufficient for 38,400 baud
-    Events.addHandler(blinkHandler,      2000);
-    Events.addHandler(quickFlashHandler,  100);
-   
-    Events.addHandler(nodeHandler,        15000);
-    Events.addHandler(oneShotHandler,     1000);
-    Events.addHandler(relayStateHandler,  15000);
+    Events.addHandler(serialHandler, 10); // Sufficient for 38,400 baud
+    Events.addHandler(blinkHandler, 1000);
+    Events.addHandler(quickFlashHandler, 100);
 
-//    Events.addHandler(segMeterHandler, 1);
-//    Events.addHandler(powerOutputHandler, 1);
+    Events.addHandler(nodeHandler, 15000);
+    Events.addHandler(temperatureSensorHandler, 7500);
+    Events.addHandler(oneShotHandler, 1000);
+    Events.addHandler(relayStateHandler, 15000);
+
+    Events.addHandler(segMeterHandler, 15000);
+    Events.addHandler(powerOutputHandler, 15000);
 #endif
 
 #ifdef IS_SLEEPY
@@ -260,7 +284,7 @@ void loop() {
 #endif
 
 #ifdef IS_AIKO
-    Events.loop();  // do stuff
+    Events.loop(); // do stuff
 #endif
 
 #ifdef NOT_AIKO
@@ -278,7 +302,6 @@ void loop() {
 byte blinkInitialized = false;
 byte blinkStatus = LOW;
 unsigned long lastQuickFlash;
-
 
 void blinkInitialize(void) {
     pinMode(PIN_LED_STATUS, OUTPUT);
@@ -355,16 +378,16 @@ void segMeterInitialise(void) {
     }
 
     channelSensors[0] = SENSOR_SCT_013_060;
-    channelSensors[1] = SENSOR_CSLT;
+    channelSensors[1] = SENSOR_SCT_013_060;
     channelSensors[2] = SENSOR_SCT_013_060;
     channelSensors[3] = SENSOR_SCT_013_060;
     channelSensors[4] = SENSOR_SCT_013_060;
     channelSensors[5] = SENSOR_SCT_013_060;
 
     channelPrimaryTurns[0] = 1;
-    channelPrimaryTurns[1] = 3;
+    channelPrimaryTurns[1] = 1;
     channelPrimaryTurns[2] = 1;
-    channelPrimaryTurns[3] = 3;
+    channelPrimaryTurns[3] = 1;
     channelPrimaryTurns[4] = 1;
     channelPrimaryTurns[5] = 1;
 
@@ -412,7 +435,7 @@ void collectChannel(int channel) {
 float calibrateRMS(int sensor_type, float this_rms, int turns) {
     float output = 0.0;
 
-    if (this_rms > 0.5) {
+    if (this_rms > 0.01) {
         switch (sensor_type) {
             case SENSOR_SCT_013_030:
                 output = this_rms * CALIBRATION_SCT_013_030;
@@ -420,10 +443,12 @@ float calibrateRMS(int sensor_type, float this_rms, int turns) {
             case SENSOR_SCT_013_060:
                 this_rms = this_rms * CALIBRATION_SCT_013_060;
                 output = nonLinearSCT_030_060_Calibration(this_rms);
+                output = correctNonLinearity(output);
                 break;
             case SENSOR_CSLT:
                 this_rms = this_rms * CALIBRATION_CSLT;
                 output = nonLinearCSLT_Calibration(this_rms);
+                output = correctNonLinearity(output);
                 break;
             case SENSOR_JAYCAR_CLIP_AREF_1:
                 output = this_rms * CALIBRATION_JAYCAR_CLIP_AREF_1;
@@ -446,22 +471,10 @@ float calibrateRMS(int sensor_type, float this_rms, int turns) {
 float nonLinearSCT_030_060_Calibration(float this_rms) {
     // Designed now for the non linear behaviour of the SCT_013_060 sensor
     float output = 0.0;
-    if (this_rms <= 4300) {
-        if (this_rms <= 160) {
-            output = this_rms * 0.93;
-        } else {
-            // y = 1.44x - 25.52
-            output = (this_rms + 25.52) / 1.44;
-        }
-    } else if (this_rms > 4300 && this_rms <= 7600) {
-        // linear_1,           # y = 1.4x - 1720
-        output = (this_rms + 1720) / 1.4;
-    } else if (this_rms > 7600 && this_rms <= 11870) {
-        // linear_2,           # y = 2.25x - 8200
-        output = (this_rms + 8200) / 2.25;
+    if (this_rms <= 160) {
+        output = this_rms * 0.93;
     } else {
-        // linear_3,          # y = 6.24x - 55580
-        output = (this_rms + 55580) / 6.24;
+        output = (this_rms + 25.52) / 1.44;
     }
     return output;
 }
@@ -478,6 +491,22 @@ float nonLinearCSLT_Calibration(float this_rms) {
     } else {
         // linear,           # y = 1.338x - 90.58
         output = (this_rms + 90.58) / 1.338;
+    }
+    return output;
+}
+
+float correctNonLinearity(float this_rms) {
+    // It appears the way the Arduino is sensing, is that an positive nonlinearity is experienced as the current increases.
+    float output = 0.0;
+    if (this_rms <= 3599) {
+        // Linear
+        output = this_rms;
+    } else if (this_rms > 3599 && this_rms <= 7708) {
+        // linear,           # y = 2.14x - 4100
+        output = (this_rms + 4100) / 2.14;
+    } else if (this_rms > 7709) {
+        // linear,           # y = 1.86x - 4755
+        output = (this_rms + 4755) / 1.86;
     }
     return output;
 }
@@ -659,12 +688,12 @@ void relayCommand(void) {
 }
 
 void quickFlashHandler(void) {
-    
+
     if (digitalRead(PIN_RELAY) == HIGH) {
-      if ((millis() - lastQuickFlash) > QUICK_FLASH_TIME) {
-          blinkHandler();
-          lastQuickFlash = millis();
-      }
+        if ((millis() - lastQuickFlash) > QUICK_FLASH_TIME) {
+            blinkHandler();
+            lastQuickFlash = millis();
+        }
     }
 }
 
