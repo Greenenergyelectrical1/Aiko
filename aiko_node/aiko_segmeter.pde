@@ -25,12 +25,12 @@
  * 6. Go to the method segMeterInitialise and setup some stuff:
  *    - Sensor type on each channel
  *    - Primary turns on each channel (default is 1)
- * 
+ *
  * 7. If you have any Q's on this, pop me a note here:
  *    Twitter: @samotage
  *    Message: https://smartenergygroups.com/questions/ask
  *
- * Good luck!  
+ * Good luck!
  * Sam.
  *
  * Third-Party libraries
@@ -99,18 +99,33 @@ using namespace Aiko;
 
 //#define HAS_SERIAL_MIRROR
 
-#define DEFAULT_NODE_NAME "power_board"
+#define DEFAULT_NODE_NAME "segmeter_chorob"
 #define DEFAULT_TRANSMIT_RATE    15  // seconds
 //#define STONE_DEBUG  // Enable capture and dump of all sampled values
 
 //#define MULTI_PHASE
-#define SINGLE_PHASE
-//#define SUM_CHANNELS
+//#define SINGLE_PHASE
+#define COMBINED_PHASE
+#define COMBINED_INDEX   2
 
-#define CHANNELS          1   // Current Clamp(s)
+/* 
+** COMBINED_PHASE 
+** Based on the combined index, the first channels are added together, the rest treated as single phases
+*/
+
+//#define SUM_CHANNELS
+//#define SUBTRACT_CHANNELS
+
+// Setup the aref to use, one or the other.
+//#define IS_5V_AREF
+#define IS_1V_AREF
+
+#define MEASUREMENT_VOLTAGE 110.0
+
+#define CHANNELS          4   // Current Clamp(s)
 #define SAMPLES        2000   // Current samples to take
-#define AVERAGES          5   // Number of RMS values to average
-#define CYCLES            5   // Number of times to cycle through the calculations
+#define AVERAGES          4   // Number of RMS values to average
+#define CYCLES            4   // Number of times to cycle through the calculations
 
 #define DEFAULT_BAUD_RATE     38400
 #define ONE_SHOT_TIME         180000
@@ -122,6 +137,7 @@ using namespace Aiko;
 #define SENSOR_SCT_013_060 3
 #define SENSOR_JAYCAR_CLIP_AREF_1 4
 #define SENSOR_JAYCAR_CLIP_AREF_5 5
+#define SENSOR_CRMAG_200 6
 
 // Calibration factors
 #define CALIBRATION_CSLT 25
@@ -129,15 +145,7 @@ using namespace Aiko;
 #define CALIBRATION_SCT_013_060 25.8
 #define CALIBRATION_JAYCAR_CLIP_AREF_1 33.333
 #define CALIBRATION_JAYCAR_CLIP_AREF_5 144.45
-
-// Deprecatable...
-//#define CALIBRATION  8  // Hall Effect with 3 passes thru opening
-//#define CALIBRATION  22  // Hall Effect with 1 pass thru opening
-//#define CALIBRATION  9.1  // SCT-013-30 amp, 1v output
-//#define CALIBRATION  25.8  // SCT-013-60 amp, 1v output
-//#define CALIBRATION  33.333  // 10 mV per Amp, 1 turn, analog reference = internal (1 VDC)
-//#define CALIBRATION   144.45  // 10 mV per Amp, analog reference = default  (5 VDC)
-
+#define CALIBRATION_CRMAG_200 1
 
 // Digital Input/Output pins
 #define PIN_SERIAL_RX       0
@@ -204,25 +212,30 @@ int skipCount = 0;
 byte commandCount = sizeof (commands) / sizeof (*commands);
 volatile boolean f_wdt = 1;
 
+float myAref = 5.0;
 SExpression parameter;
 
 void setup() {
     Serial.begin(DEFAULT_BAUD_RATE);
     // no ref means that it's at the 5Volts, perfect for the voltage handler.
+
+#ifdef IS_1V_AREF
     //analogReference(EXTERNAL);
     analogReference(INTERNAL);
-
+    myAref = 1.1;
+#endif
 
 #ifdef IS_AIKO
     // handlers set to 1 milisecond to use sleep mode
     Events.addHandler(serialHandler, 10); // Sufficient for 38,400 baud
+ //   Events.addHandler(serialMirrorHandler, 30); // Sufficient for 38,400 baud
     Events.addHandler(blinkHandler, 1000);
     Events.addHandler(quickFlashHandler, 100);
 
     Events.addHandler(nodeHandler, 15000);
-    Events.addHandler(temperatureSensorHandler, 7500);
-    Events.addHandler(oneShotHandler, 1000);
-    Events.addHandler(relayStateHandler, 15000);
+ //   Events.addHandler(temperatureSensorHandler, 60000);
+ // Events.addHandler(oneShotHandler, 1000);
+ // Events.addHandler(relayStateHandler, 60000);
 
     Events.addHandler(segMeterHandler, 15000);
     Events.addHandler(powerOutputHandler, 15000);
@@ -238,17 +251,11 @@ void setup() {
     // 1    0  0 Reserved
     // 1    0  1 Reserved
     // 1    1  0 Standby(1)
-
     cbi(SMCR, SE); // sleep enable, power down mode
     cbi(SMCR, SM0); // power down mode
     sbi(SMCR, SM1); // power down mode
     cbi(SMCR, SM2); // power down mode
-
     setup_watchdog(7);
-#endif
-
-#ifdef HAS_SERIAL_MIRROR
-    Events.addHandler(serialMirrorHandler, 30); // Sufficient for 38,400 baud
 #endif
 
 }
@@ -265,10 +272,8 @@ void loop() {
 #ifdef IS_SLEEPY
     if (f_wdt == 1) { // wait for timed out watchdog / flag is set when a watchdog timeout occurs
         f_wdt = 0; // reset flag
-
         if (skipCount == 10) {
             skipCount = 0;
-
             digitalWrite(PIN_ZIGBEE_SLEEP, HIGH);
             delay(100); // time to power up
             Events.loop(); // do stuff
@@ -278,7 +283,6 @@ void loop() {
         } else {
             skipCount += 1;
         }
-
         system_sleep(); // have nap
     }
 #endif
@@ -288,7 +292,6 @@ void loop() {
 #endif
 
 #ifdef NOT_AIKO
-
     segMeterHandler();
     nodeHandler();
     powerOutputHandler();
@@ -383,7 +386,7 @@ void segMeterInitialise(void) {
     channelSensors[3] = SENSOR_SCT_013_060;
     channelSensors[4] = SENSOR_SCT_013_060;
     channelSensors[5] = SENSOR_SCT_013_060;
-
+    
     channelPrimaryTurns[0] = 1;
     channelPrimaryTurns[1] = 1;
     channelPrimaryTurns[2] = 1;
@@ -399,6 +402,10 @@ void segMeterHandler() {
     // Accumulate
     for (int cycle = 0; cycle < CYCLES; cycle++) {
         collectChannels(); // Go get those dataz!
+#ifdef HAS_SERIAL_MIRROR
+        // Listen and send on the serial mirror.
+        serialMirrorHandler();
+#endif
     }
 }
 
@@ -407,15 +414,22 @@ void collectChannels() {
         pin = PIN_CURRENT_SENSOR_1 + channel;
         flash(); // a little message that we are collecting.
         energySumNow[channel] = 0;
-        collectChannel(channel);
+        // TODO Magic here to deermine collection method
+
+        if (channelSensors[channel] != SENSOR_CRMAG_200) {
+            collectChannelRMS(channel);
+        } else {
+            collectChannelTransduced(channel);
+        }
         energySum[channel] += energySumNow[channel];
     }
 }
 
-void collectChannel(int channel) {
-    watts_sum = 0;
+void collectChannelRMS(int channel) {
+    // For RMS sampling of an analog waveform
+    watts_sum = 0.0;
     for (int average = 0; average < AVERAGES; average++) {
-        rms = 0;
+        rms = 0.0;
         for (int index = 0; index < SAMPLES; index++) {
             sample = analogRead(pin);
             rms += sq((float) sample);
@@ -430,6 +444,29 @@ void collectChannel(int channel) {
         energySumNow[channel] = energySumNow[channel] + (watts[channel] * (duration / 1000.0 / 3600.0));
     }
     energySumTime[channel] = timeNow;
+}
+
+void collectChannelTransduced(int channel) {
+    // For voltage output from an RMS processing sensor
+    watts_sum = 0.0;
+    for (int average = 0; average < AVERAGES; average++) {
+        rms = 0.0;
+        for (int index = 0; index < SAMPLES; index++) {
+            //rms += 1023.0;
+            rms += (float) analogRead(pin);
+        }
+        rms = rms / SAMPLES;
+        // Then work out in relation to the 200 amp sensor.
+        watts_sum += (((rms * (myAref / 1024)) / 5) * 200) * MEASUREMENT_VOLTAGE;
+    }
+    watts[channel] = watts_sum / AVERAGES;
+    timeNow = millis(); // Mr Wolf.
+    if (timeNow > energySumTime[channel]) { // Sanity check, in case millis() wraps around
+        duration = timeNow - energySumTime[channel];
+        energySumNow[channel] = energySumNow[channel] + (watts[channel] * (duration / 1000.0 / 3600.0));
+    }
+    energySumTime[channel] = timeNow;
+
 }
 
 float calibrateRMS(int sensor_type, float this_rms, int turns) {
@@ -460,7 +497,8 @@ float calibrateRMS(int sensor_type, float this_rms, int turns) {
                 output = this_rms;
                 break;
         }
-        output = output / turns;
+        // Factor for turns and measurement voltage.  110V should be less than 240V for the same current.
+        output = (output / turns) * (MEASUREMENT_VOLTAGE / 240);
     } else {
         output = 0.0;
     }
@@ -512,7 +550,10 @@ float correctNonLinearity(float this_rms) {
 }
 
 void powerOutputHandler() {
+
 #ifdef MULTI_PHASE
+    // 
+
     globalString.begin();
 
     currentKW_1 = 0.0;
@@ -525,7 +566,7 @@ void powerOutputHandler() {
         if (channel == 0 || channel == 1 || channel == 2) {
             currentKW_1 += watts[channel];
             energySum_1 += energySum[channel];
-        } else {
+        } else if (CHANNELS > 3 ) {
             currentKW_2 += watts[channel];
             energySum_2 += energySum[channel];
         }
@@ -546,12 +587,40 @@ void powerOutputHandler() {
     globalString += "(energy_2 ";
     globalString += energySum_2;
     globalString += " Wh)";
+
 #endif
 
-#ifdef SINGLE_PHASE
+#ifdef COMBINED_PHASE
+    // 
+
     globalString.begin();
 
+    currentKW_1 = 0.0;
+    energySum_1 = 0.0;
+
+    currentKW_2 = 0.0;
+    energySum_2 = 0.0;
+
     for (int channel = 0; channel < CHANNELS; channel++) {
+        if (channel <  COMBINED_INDEX) {
+            // Aggregate it
+            currentKW_1 += watts[channel];
+            energySum_1 += energySum[channel];
+        }
+    }
+
+    globalString += "(power_1 ";
+    globalString += currentKW_1;
+    globalString += " W)";
+
+    globalString += "(energy_1 ";
+    globalString += energySum_1;
+    globalString += " Wh)";
+    
+    // Now do the rest!
+    
+    for (int channel = COMBINED_INDEX; channel < CHANNELS; channel++) {
+
         globalString += "(power_";
         globalString += channel + 1;
         globalString += " ";
@@ -563,33 +632,82 @@ void powerOutputHandler() {
         globalString += " ";
         globalString += energySum[channel];
         globalString += " Wh)";
-
-        // some debug things
-        //Serial.print(watts[channel]);
-        //Serial.print(", ");
     }
-    //Serial.println("");
+
+#endif
+
+#ifdef SINGLE_PHASE
+    globalString.begin();
+
+    for (int channel = 0; channel < CHANNELS; channel++) {
+
+        globalString += "(power_";
+        globalString += channel + 1;
+        globalString += " ";
+        globalString += watts[channel];
+        globalString += " W)";
+
+        globalString += "(energy_";
+        globalString += channel + 1;
+        globalString += " ";
+        globalString += energySum[channel];
+        globalString += " Wh)";
+    }
+
 #endif
 
 #ifdef SUM_CHANNELS
     currentKWOut = 0.0;
     energySumOut = 0.0;
-
+    
     // Sum the puppies
     for (int channel = 0; channel < CHANNELS; channel++) {
+        
         currentKWOut += watts[channel];
         energySumOut += energySum[channel];
     }
+    
+     globalString += "(power ";
+     globalString += currentKWOut;
+     globalString += " W)";
 
-    globalString += "(power ";
-    globalString += currentKWOut;
-    globalString += " W)";
-
-    globalString += "(energy ";
-    globalString += energySumOut;
-    globalString += " Wh)";
+     globalString += "(energy ";
+     globalString += energySumOut;
+     globalString += " Wh)";
 #endif
 
+#ifdef SUBTRACT_CHANNELS
+    currentKWOut = 0.0;
+    energySumOut = 0.0;
+    
+    // Sum the puppies to make channel number 7,
+    // channel 7 = Channel 1 - ( Channels 2 thru 6)
+    // Because this is a computer, we use 0 instead of 1...
+    
+    for (int channel = 1; channel < CHANNELS; channel++) {
+        
+        currentKWOut += watts[channel];
+        energySumOut += energySum[channel];
+    }
+    
+     currentKWOut = watts[0] - currentKWOut;
+     energySumOut = energySum[0] - energySumOut;
+     
+     // Sanitisation
+     
+     if ( currentKWOut < 0.0 ) {
+       currentKWOut = 0;
+       energySumOut = 0;
+     }
+    
+     globalString += "(power_7 ";
+     globalString += currentKWOut;
+     globalString += " W)";
+
+     globalString += "(energy_7 ";
+     globalString += energySumOut;
+     globalString += " Wh)";
+#endif
     sendMessage(globalString);
 
     // Lets reseet the output arrays for the next time through.
@@ -1088,7 +1206,7 @@ byte serialMirrorInitialized = false;
 
 NewSoftSerial serialMirror = NewSoftSerial(SERIAL_MIRROR_RX_PIN, SERIAL_MIRROR_TX_PIN);
 
-#define SERIAL_MIRROR_BUFFER_SIZE 128
+#define SERIAL_MIRROR_BUFFER_SIZE 256
 
 void serialMirrorInitialize(void) {
     serialMirror.begin(DEFAULT_BAUD_RATE);
@@ -1114,14 +1232,17 @@ void serialMirrorHandler(void) {
             }
         }
     } else {
-        /*  globalString.begin();
+         
+         globalString.begin();
          globalString  = "(info readCount ";
          globalString += count;
          globalString += ")";
          sendMessage(globalString);
-         */
+         
+         
         for (byte index = 0; index < count; index++) {
             char ch = serialMirror.read();
+            
             if (ch == '\n') continue;
 
             if (serialMirrorLength >= (sizeof (serialMirrorBuffer) / sizeof (*serialMirrorBuffer))) {
@@ -1136,10 +1257,11 @@ void serialMirrorHandler(void) {
             }
         }
 
-        serialMirrorTimeOut = timeNow + 5000;
+        serialMirrorTimeOut = timeNow + 20000;
     }
 }
 #endif
+
 
 
 

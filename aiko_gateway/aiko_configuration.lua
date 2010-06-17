@@ -10,7 +10,7 @@
 --------------------------------------------------------------------------
 -- Aiko-Gateway: Name of this system (also used by Smart Energy Groups) --
 --------------------------------------------------------------------------
-  aiko_gateway_name = "rubus"
+  aiko_gateway_name = "segbox"
 
 -------------------------------------------------------------------------
 -- Smart Energy Groups: Your unique identifier for the web service API --
@@ -18,9 +18,6 @@
 --  site_token = "site_unregistered"
 -- Sams home:
 --  site_token = "site_42121f21b26e7adf0dece67f356090b07167f93a"
--- Sams demo site:
-  site_token = "site_37a75bb4e3548f38685e02658408da4d7fba0919"
-
 
 -- Aiko-Node: Serial connection sample time
   serial_timeout_period = 5.0  -- seconds
