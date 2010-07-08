@@ -104,9 +104,9 @@ using namespace Aiko;
 //#define STONE_DEBUG  // Enable capture and dump of all sampled values
 
 //#define MULTI_PHASE
-//#define SINGLE_PHASE
-#define COMBINED_PHASE
-#define COMBINED_INDEX   2
+#define SINGLE_PHASE
+//#define COMBINED_PHASE
+//#define COMBINED_INDEX 2
 
 /* 
 ** COMBINED_PHASE 
@@ -120,12 +120,12 @@ using namespace Aiko;
 //#define IS_5V_AREF
 #define IS_1V_AREF
 
-#define MEASUREMENT_VOLTAGE 110.0
+#define MEASUREMENT_VOLTAGE 240.0
 
 #define CHANNELS          4   // Current Clamp(s)
 #define SAMPLES        2000   // Current samples to take
-#define AVERAGES          4   // Number of RMS values to average
-#define CYCLES            4   // Number of times to cycle through the calculations
+#define AVERAGES          5   // Number of RMS values to average
+#define CYCLES            5   // Number of times to cycle through the calculations
 
 #define DEFAULT_BAUD_RATE     38400
 #define ONE_SHOT_TIME         180000
@@ -295,6 +295,7 @@ void loop() {
     segMeterHandler();
     nodeHandler();
     powerOutputHandler();
+    temperatureSensorHandler();
 #endif
 }
 
@@ -606,7 +607,6 @@ void powerOutputHandler() {
             // Aggregate it
             currentKW_1 += watts[channel];
             energySum_1 += energySum[channel];
-        }
     }
 
     globalString += "(power_1 ";
@@ -1261,7 +1261,6 @@ void serialMirrorHandler(void) {
     }
 }
 #endif
-
 
 
 
