@@ -90,18 +90,16 @@ using namespace Aiko;
 // the folowing def is to use some other analog inputs.
 //#define IS_3_CHANNEL
 
-//#define IS_SLEEPY
-#define NOT_SLEEPY
-
 //To use or not use the Aiko events system
 //#define IS_AIKO
 #define NOT_AIKO
 
 //#define HAS_SERIAL_MIRROR
 
-#define DEFAULT_NODE_NAME "segmeter_chorob"
+#define DEFAULT_NODE_NAME "pb"
+
+// Transmit rate is only used for IS_AIKO option
 #define DEFAULT_TRANSMIT_RATE    15  // seconds
-//#define STONE_DEBUG  // Enable capture and dump of all sampled values
 
 //#define MULTI_PHASE
 #define SINGLE_PHASE
@@ -120,12 +118,14 @@ using namespace Aiko;
 //#define IS_5V_AREF
 #define IS_1V_AREF
 
-#define MEASUREMENT_VOLTAGE 240.0
+// For Australian conditions, 230V is the voltage to use becase of fluctionations.
+#define MEASUREMENT_VOLTAGE 230.0
 
-#define CHANNELS          4   // Current Clamp(s)
+
+#define CHANNELS          6   // Current Clamp(s)
 #define SAMPLES        2000   // Current samples to take
 #define AVERAGES          5   // Number of RMS values to average
-#define CYCLES            5   // Number of times to cycle through the calculations
+#define CYCLES            3   // Number of times to cycle through the calculations
 
 #define DEFAULT_BAUD_RATE     38400
 #define ONE_SHOT_TIME         180000
@@ -154,12 +154,6 @@ using namespace Aiko;
 #define PIN_RELAY           7
 #define PIN_LED_STATUS     13 // Standard Arduino flashing LED !
 
-#ifdef IS_SLEEPY
-#include <avr/sleep.h>
-#include <avr/wdt.h>
-#define PIN_ZIGBEE_SLEEP    7 // Signal to Zibee pins 4, 6 and 7 to sleep.  High on, Low sleepy.
-#endif
-
 // Analogue Input pins
 #define PIN_CURRENT_SENSOR_1  0 // Electrical monitoring
 // Digital Input/Output pins
@@ -169,7 +163,6 @@ using namespace Aiko;
 // Analogue Input pins not used for 6 channel sensing
 #define PIN_LIGHT_SENSOR    3
 #define PIN_VOLTAGE_SENSOR  4
-
 
 #include <PString.h>
 char globalBuffer[250]; // Used to manage dynamically constructed strings
@@ -240,24 +233,6 @@ void setup() {
     Events.addHandler(segMeterHandler, 15000);
     Events.addHandler(powerOutputHandler, 15000);
 #endif
-
-#ifdef IS_SLEEPY
-    // CPU Sleep Modes
-    // SM2 SM1 SM0 Sleep Mode
-    // 0    0  0 Idle
-    // 0    0  1 ADC Noise Reduction
-    // 0    1  0 Power-down
-    // 0    1  1 Power-save
-    // 1    0  0 Reserved
-    // 1    0  1 Reserved
-    // 1    1  0 Standby(1)
-    cbi(SMCR, SE); // sleep enable, power down mode
-    cbi(SMCR, SM0); // power down mode
-    sbi(SMCR, SM1); // power down mode
-    cbi(SMCR, SM2); // power down mode
-    setup_watchdog(7);
-#endif
-
 }
 
 #ifdef NOT_AIKO
@@ -268,24 +243,6 @@ float seconds = 0;
 #endif
 
 void loop() {
-
-#ifdef IS_SLEEPY
-    if (f_wdt == 1) { // wait for timed out watchdog / flag is set when a watchdog timeout occurs
-        f_wdt = 0; // reset flag
-        if (skipCount == 10) {
-            skipCount = 0;
-            digitalWrite(PIN_ZIGBEE_SLEEP, HIGH);
-            delay(100); // time to power up
-            Events.loop(); // do stuff
-            delay(500); // to allow the send of the data over serial
-            digitalWrite(PIN_ZIGBEE_SLEEP, LOW);
-            delay(100); // time to power down
-        } else {
-            skipCount += 1;
-        }
-        system_sleep(); // have nap
-    }
-#endif
 
 #ifdef IS_AIKO
     Events.loop(); // do stuff
@@ -382,12 +339,12 @@ void segMeterInitialise(void) {
     }
 
     channelSensors[0] = SENSOR_SCT_013_060;
-    channelSensors[1] = SENSOR_SCT_013_060;
-    channelSensors[2] = SENSOR_SCT_013_060;
-    channelSensors[3] = SENSOR_SCT_013_060;
-    channelSensors[4] = SENSOR_SCT_013_060;
+    channelSensors[1] = SENSOR_CSLT;
+    channelSensors[2] = SENSOR_CSLT;
+    channelSensors[3] = SENSOR_CSLT;
+    channelSensors[4] = SENSOR_CSLT;
     channelSensors[5] = SENSOR_SCT_013_060;
-    
+
     channelPrimaryTurns[0] = 1;
     channelPrimaryTurns[1] = 1;
     channelPrimaryTurns[2] = 1;
@@ -573,21 +530,21 @@ void powerOutputHandler() {
         }
     }
 
-    globalString += "(power_1 ";
+    globalString += "(p_1 ";
     globalString += currentKW_1;
-    globalString += " W)";
+    globalString += ")";
 
-    globalString += "(energy_1 ";
+    globalString += "(e_1 ";
     globalString += energySum_1;
-    globalString += " Wh)";
+    globalString += ")";
 
-    globalString += "(power_2 ";
+    globalString += "(p_2 ";
     globalString += currentKW_2;
-    globalString += " W)";
+    globalString += ")";
 
-    globalString += "(energy_2 ";
+    globalString += "(e_2 ";
     globalString += energySum_2;
-    globalString += " Wh)";
+    globalString += ")";
 
 #endif
 
@@ -609,29 +566,29 @@ void powerOutputHandler() {
             energySum_1 += energySum[channel];
     }
 
-    globalString += "(power_1 ";
+    globalString += "(p_1 ";
     globalString += currentKW_1;
-    globalString += " W)";
+    globalString += ")";
 
-    globalString += "(energy_1 ";
+    globalString += "(e_1 ";
     globalString += energySum_1;
-    globalString += " Wh)";
+    globalString += ")";
     
     // Now do the rest!
     
     for (int channel = COMBINED_INDEX; channel < CHANNELS; channel++) {
 
-        globalString += "(power_";
+        globalString += "(p_";
         globalString += channel + 1;
         globalString += " ";
         globalString += watts[channel];
-        globalString += " W)";
+        globalString += ")";
 
-        globalString += "(energy_";
+        globalString += "(e_";
         globalString += channel + 1;
         globalString += " ";
         globalString += energySum[channel];
-        globalString += " Wh)";
+        globalString += ")";
     }
 
 #endif
@@ -641,17 +598,17 @@ void powerOutputHandler() {
 
     for (int channel = 0; channel < CHANNELS; channel++) {
 
-        globalString += "(power_";
+        globalString += "(p_";
         globalString += channel + 1;
         globalString += " ";
         globalString += watts[channel];
-        globalString += " W)";
+        globalString += ")";
 
-        globalString += "(energy_";
+        globalString += "(e_";
         globalString += channel + 1;
         globalString += " ";
         globalString += energySum[channel];
-        globalString += " Wh)";
+        globalString += ")";
     }
 
 #endif
@@ -667,13 +624,13 @@ void powerOutputHandler() {
         energySumOut += energySum[channel];
     }
     
-     globalString += "(power ";
+     globalString += "(p ";
      globalString += currentKWOut;
-     globalString += " W)";
+     globalString += ")";
 
-     globalString += "(energy ";
+     globalString += "(e ";
      globalString += energySumOut;
-     globalString += " Wh)";
+     globalString += ")";
 #endif
 
 #ifdef SUBTRACT_CHANNELS
@@ -700,13 +657,13 @@ void powerOutputHandler() {
        energySumOut = 0;
      }
     
-     globalString += "(power_7 ";
+     globalString += "(p_7 ";
      globalString += currentKWOut;
-     globalString += " W)";
+     globalString += ")";
 
-     globalString += "(energy_7 ";
+     globalString += "(e_7 ";
      globalString += energySumOut;
-     globalString += " Wh)";
+     globalString += ")";
 #endif
     sendMessage(globalString);
 
@@ -821,50 +778,7 @@ void relayMessager(char* message) {
     sendMessage(globalString);
 }
 
-#ifdef IS_SLEEPY
-//****************************************************************
-// set system into the sleep state
-// system wakes up when wtchdog is timed out
 
-void system_sleep() {
-    cbi(ADCSRA, ADEN); // switch Analog to Digitalconverter OFF
-    set_sleep_mode(SLEEP_MODE_PWR_DOWN); // sleep mode is set here
-    sleep_enable();
-    sleep_mode(); // System sleeps here
-    sleep_disable(); // System continues execution here when watchdog timed out
-    sbi(ADCSRA, ADEN); // switch Analog to Digitalconverter ON
-}
-
-//****************************************************************
-// 0=16ms, 1=32ms,2=64ms,3=128ms,4=250ms,5=500ms
-// 6=1 sec,7=2 sec, 8=4 sec, 9= 8sec
-
-void setup_watchdog(int ii) {
-
-    byte bb;
-    int ww;
-    if (ii > 9) ii = 9;
-    bb = ii & 7;
-    if (ii > 7) bb |= (1 << 5);
-    bb |= (1 << WDCE);
-    ww = bb;
-    Serial.println(ww);
-
-    MCUSR &= ~(1 << WDRF);
-    // start timed sequence
-    WDTCSR |= (1 << WDCE) | (1 << WDE);
-    // set new watchdog timeout value
-    WDTCSR = bb;
-    WDTCSR |= _BV(WDIE);
-}
-//****************************************************************
-// Watchdog Interrupt Service / is executed when  watchdog timed out
-
-ISR(WDT_vect) {
-    f_wdt = 1; // set global flag
-}
-
-#endif
 
 /* --------------------------------------------------------------------------
  ** Voltage Sensor
@@ -1261,6 +1175,7 @@ void serialMirrorHandler(void) {
     }
 }
 #endif
+
 
 
 
