@@ -6,7 +6,7 @@
 -- Copyright (c) 2009 by Geekscape Pty. Ltd.
 -- Documentation:  http://groups.google.com/group/aiko-platform
 -- License: GPLv3. http://geekscape.org/static/arduino_license.html
--- Version: 0.2
+-- Version: 0.3
 -- ------------------------------------------------------------------------- --
 -- See Google Docs: "Project: Aiko: Stream protocol specification"
 -- Currently requires an Aiko Gateway (indirect mode only).
@@ -220,14 +220,15 @@ function custom_sink()
   end
 end
 
-function WaitLoop(milliseconds)
-   
-end
 -- ------------------------------------------------------------------------- --
+
+send_message_disabled = false
 
 function send_message(message)
   local http = require("socket.http")
   local response = {}
+
+  if (send_message_disabled) then return end
 
   if (debug) then print("-- send_message(): start") end
 
@@ -237,7 +238,7 @@ function send_message(message)
     url = url,
     method = method,
     headers = {
-      ["content-length"] = string.len(message),
+      ["content-length"] = message:len(),
       ["content-type"]   = content_type
     },
 --  source = ltn12.source.file(io.open(file_name, "r")),
@@ -294,98 +295,34 @@ function send_message(message)
       if (command) then
         if (debug) then print("-- send message(): command: ", command) end
         serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
-        serial_client:send(command .. ";\n")
+      end
+    end
 
-      
+-- Check response wrapped by site command, e..g (site= new_site_token)
+    if (response:sub(1, 7) == "(site= ") then
+      local start, finish = response:find("\n", 1, PLAIN)
+      local message = response:sub(1, start - 1)
+      response = response:sub(finish + 1)
+
+-- Parse and save new site token
+      save_site_token(message:sub(8, -2))
+      if (debug) then
+        print("-- parse_message(): new site token: " .. site_token)
       end
     end
 
     if (response == "(status okay)") then
       if (debug) then print("-- send_message(): status: okay") end
+    elseif (response:sub(1, 14) == "(status error ") then
+      local error = response:sub(15, -2)
+
+      if (error == "no_site_token") then
+        site_discovery_timeout()
+      else
+        print("Status: Error: ", error)
+      end
     else
-      print("HTTP response: ", response)
+      print("Error: HTTP response: ", response)
     end
   end
 
@@ -397,7 +334,7 @@ end
 function send_event_boot(node_name)
   if (debug) then print("-- send_event_boot(): " .. node_name) end
 
-  message = "(boot_event 0 number)"
+  message = "(status boot 0.3)"
   send_message(wrap_message(message, node_name))
 end
 
@@ -406,8 +343,40 @@ end
 function send_event_heartbeat(node_name)
   if (debug) then print("-- send_event_heartbeat(): " .. node_name) end
 
-  message = "(cpu_usage 0 %) (node_count 1 number)"
+--message = "(cpu_usage 0 %) (node_count 1 number)"
+  message = "(status heartbeat)"
   send_message(wrap_message(message, node_name))
+end
+
+-- ------------------------------------------------------------------------- --
+
+function save_site_token(new_site_token)
+  if (new_site_token ~= site_token) then
+    site_token = new_site_token
+
+    local output = assert(io.open("aiko_configuration.lua", "a"))
+    output:write("  site_token = \"" .. site_token .. "\"\n")
+    assert(output:close())
+
+    if (debug) then print("-- save_site_token(): saved " .. site_token) end
+  end
+end
+
+-- ------------------------------------------------------------------------- --
+
+site_discovery_timer = 0
+
+function site_discovery_timeout()
+  if (debug) then print("-- site_discovery_timeout():") end
+
+  if (site_discovery_timer == 0) then
+    site_discovery_timer = os.time() + site_discovery_gracetime
+  else
+    if (os.time() > site_discovery_timer) then
+      send_message_disabled = true
+      if (debug) then print("-- site_discovery_timeout(): expired") end
+    end
+  end
 end
 
 -- ------------------------------------------------------------------------- --
@@ -454,18 +423,10 @@ end
 -- ------------------------------------------------------------------------- --
 
 function serial_handler()
-
-  if (debug) then
-    print("About to establish ser2net connection...") 
-  end
   serial_client = socket.connect(aiko_gateway_address, 2000)
   serial_client:settimeout(serial_timeout_period)  -- 0 --> non-blocking read
 
 --serial_client:send("")
-
-  if (debug) then
-    print("Got ser2net connection, and continuing") 
-  end
 
   local stream, status, partial
 
@@ -545,7 +506,6 @@ function parse_message(buffer)
               if (debug) then print("-- parse_message(): event: ", message) end
 
               send_message(wrap_message(message, node_name))
-           
             else
               print("-- parse_message(): ERROR: Problem after the node name")
             end
@@ -760,7 +720,7 @@ end
 
 -- ------------------------------------------------------------------------- --
 
-print("[Aiko-Gateway V0.2 2009-12-24]");
+print("[Aiko-Gateway V0.3 2010-09-23]")
 
 if (not is_production()) then require("luarocks.require") end
 require("socket")

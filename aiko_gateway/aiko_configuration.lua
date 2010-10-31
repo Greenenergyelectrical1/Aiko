@@ -2,10 +2,10 @@
 -- aiko_configuration.lua
 -- ~~~~~~~~~~~~~~~~~~~~~~
 -- Please do not remove the following notices.
--- Copyright (c) 2009 by Geekscape Pty. Ltd.
+-- Copyright (c) 2009-2010 by Geekscape Pty. Ltd.
 -- Documentation:  http://groups.google.com/group/aiko-platform
 -- License: GPLv3. http://geekscape.org/static/arduino_license.html
--- Version: 0.2
+-- Version: 0.3
 
 --------------------------------------------------------------------------
 -- Aiko-Gateway: Name of this system (also used by Smart Energy Groups) --
@@ -15,9 +15,10 @@
 -------------------------------------------------------------------------
 -- Smart Energy Groups: Your unique identifier for the web service API --
 -------------------------------------------------------------------------
---  site_token = "site_unregistered"
--- Sams home:
---  site_token = "site_42121f21b26e7adf0dece67f356090b07167f93a"
+  site_token = "site_unknown"
+
+-- Time allowed for site discovery, before giving up 
+  site_discovery_gracetime = 600.0  -- seconds
 
 -- Aiko-Node: Serial connection sample time
   serial_timeout_period = 5.0  -- seconds
@@ -30,9 +31,8 @@
 ----------------------------------------------------
   if (is_production()) then                  -- Running on Aiko-Gateway router
     aiko_gateway_address = "127.0.0.1"       -- Safer to avoid hostname lookup
-    debug = true
+    debug = false
   else                                       -- Running on Desktop / Laptop
---    aiko_gateway_address = "ASUS_ROUTER"     -- Aiko-Gateway IP Address ?
     aiko_gateway_address = "127.0.0.1"
     debug = true
   end

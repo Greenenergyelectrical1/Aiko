@@ -1,4 +1,3 @@
-
 /* aiko_segmeter.pde
  * ~~~~~~~~~~~~~
  * Please do not remove the following notices.
@@ -94,9 +93,9 @@ using namespace Aiko;
 //#define IS_AIKO
 #define NOT_AIKO
 
-//#define HAS_SERIAL_MIRROR
+#define HAS_SERIAL_MIRROR
 
-#define DEFAULT_NODE_NAME "segmeter_100922_1116"
+#define DEFAULT_NODE_NAME "parent"
 
 // This is only relevant if IS_AIKO
 #define DEFAULT_TRANSMIT_RATE    15  // seconds
@@ -166,30 +165,45 @@ using namespace Aiko;
 #define OUTPUT_MULTIPLIER 1.0
 
 
-#define CHANNELS          6   // Current Clamp(s)
-#define SAMPLES        1500   // Current samples to take
+#define CHANNELS          4   // Current Clamp(s)
+#define SAMPLES        1500  // Current samples to take
 #define AVERAGES          5   // Number of RMS values to average
 #define CYCLES            1   // Number of times to cycle through the calculations
 
-#define DEFAULT_BAUD_RATE     38400
+//#define DEFAULT_BAUD_RATE     38400
+#define DEFAULT_BAUD_RATE     9600
 #define ONE_SHOT_TIME         180000
 #define QUICK_FLASH_TIME      20
 
 // Sensor Types
 #define SENSOR_CSLT 1
+
 #define SENSOR_SCT_013_030 2
 #define SENSOR_SCT_013_060 3
+
 #define SENSOR_JAYCAR_CLIP_AREF_1 4
-#define SENSOR_JAYCAR_CLIP_AREF_5 5
-#define SENSOR_CRMAG_200 6
+#define SENSOR_JAYCAR_CLIP_AREF_1_LOW 5
+#define SENSOR_JAYCAR_CLIP_AREF_5 6
+
+#define SENSOR_CRMAG_200 7
+#define SENSOR_JD_100 8
+#define SENSOR_JD_250 9
+#define SENSOR_JD_500 10
 
 // Calibration factors
 #define CALIBRATION_CSLT 25
+
 #define CALIBRATION_SCT_013_030 9.1
 #define CALIBRATION_SCT_013_060 25.8
+
 #define CALIBRATION_JAYCAR_CLIP_AREF_1 33.333
+#define CALIBRATION_JAYCAR_CLIP_AREF_1_LOW 280.0
 #define CALIBRATION_JAYCAR_CLIP_AREF_5 144.45
+
 #define CALIBRATION_CRMAG_200 1
+#define CALIBRATION_JD_100 1.1
+#define CALIBRATION_JD_250 1.1
+#define CALIBRATION_JD_500 1.1
 
 // Digital Input/Output pins
 #define PIN_SERIAL_RX       0
@@ -209,8 +223,13 @@ using namespace Aiko;
 
 #include <PString.h>
 #define SEG_STRING_SIZE 11
+#define BUFFER_SIZE 250
 
-char globalBuffer[250]; // Used to manage dynamically constructed strings
+// How often to stop for a serial mirror look in the main sample loop.
+#define MIRROR_FREQUENCY 50
+int mirror_samples = MIRROR_FREQUENCY;
+
+char globalBuffer[BUFFER_SIZE]; // Used to manage dynamically constructed strings
 PString globalString(globalBuffer, sizeof (globalBuffer));
 
 //String segString = String(11);
@@ -297,7 +316,7 @@ void loop() {
 
 #ifdef NOT_AIKO
     segMeterHandler();
-    nodeHandler();
+    //nodeHandler();
     powerOutputHandler();
     temperatureSensorHandler();
 #endif
@@ -311,6 +330,24 @@ void subEvents() {
   //Serial.println("Starting sub events...");
   serialHandler();
   oneShotHandler();
+  
+  /* 
+  * The Serial mirror handler is in a bunch of places, to service
+  * the 64 byte buffer more frequently.  They are:
+  * 1.  Here.
+  * 2.  Collect Channels.
+  * 3.  RMS Sampling loop.
+  * 4.  Transduced Sampling loop.
+  * 5.  Power output handler
+  */
+  
+  #ifdef HAS_SERIAL_MIRROR
+    // Listen and send on the serial mirror.
+    serialMirrorHandler();
+    mirror_samples = MIRROR_FREQUENCY;
+  #endif
+  
+        
   //Serial.println("Finished with sub events...");
 }
 
@@ -421,7 +458,7 @@ void parseCommand(char* buffer) {
         }
      */
     if (commandArray[0].isEqualTo(nodeName)) {
-        Serial.println("...we have a node winner!");
+        // Serial.println("...we have a node winner!");
 
         // Make the SEG commands
         seg_commands.parse(commandArray[1]);
@@ -429,15 +466,15 @@ void parseCommand(char* buffer) {
         String choppd = chop_string(seg_commands.head(), seg_commands.size());
 
         if (strncmp(choppd, "relay", 5) == 0) {
-            Serial.println("...we going to command the node now.");
+            // Serial.println("...we going to command the node now.");
             relayCommand();
 
         } else {
-            Serial.println("...not commanding");
+            // Serial.println("...not commanding");
         }
 
     } else {
-        Serial.println("...not for this node");
+        // Serial.println("...not for this node");
     }
 }
 
@@ -687,13 +724,14 @@ float watts[CHANNELS]; // Instantaneous
 float energySum[CHANNELS]; // Cumulative for the cycles
 float energySumNow[CHANNELS]; // Cumulative for the current cycle
 float energySumLast[CHANNELS]; // For calculating instantaneous energySum
-float channelTrim[CHANNELS]; // To trim the output
+
 
 // Tell it what sensors are on which channels
-int channelSensors[CHANNELS];
+int channelSensors[6];
 
 // Tell it how many primary turns, usually 1
-float channelPrimaryTurns[CHANNELS];
+float channelPrimaryTurns[6];
+float channelTrim[6]; // To trim the output
 
 float currentKWOut;
 float energySumOut;
@@ -730,12 +768,12 @@ void segMeterInitialise(void) {
         energySumTime[channel] = millis();
     }
 
-    channelSensors[0] = SENSOR_SCT_013_060;
-    channelSensors[1] = SENSOR_CSLT;
-    channelSensors[2] = SENSOR_CSLT;
-    channelSensors[3] = SENSOR_CSLT;
-    channelSensors[4] = SENSOR_CSLT;
-    channelSensors[5] = SENSOR_CSLT;
+    channelSensors[0] = SENSOR_JD_100;
+    channelSensors[1] = SENSOR_JD_100;
+    channelSensors[2] = SENSOR_SCT_013_060;
+    channelSensors[3] = SENSOR_SCT_013_060;
+    channelSensors[4] = SENSOR_SCT_013_060;
+    channelSensors[5] = SENSOR_SCT_013_060;
     
     channelPrimaryTurns[0] = 1;
     channelPrimaryTurns[1] = 1;
@@ -759,13 +797,7 @@ void segMeterHandler() {
     if (segMeterInitialised == false) segMeterInitialise();
     // Accumulate
     for (int cycle = 0; cycle < CYCLES; cycle++) {
-
         collectChannels(); // Go get those dataz!
-
-#ifdef HAS_SERIAL_MIRROR
-        // Listen and send on the serial mirror.
-        serialMirrorHandler();
-#endif
     }
 }
 
@@ -775,15 +807,94 @@ void collectChannels() {
         flash(); // a little message that we are collecting.
         energySumNow[channel] = 0;
         // TODO Magic here to deermine collection method
-
-        if (channelSensors[channel] != SENSOR_CRMAG_200) {
-            collectChannelRMS(channel);
-        } else {
-
-            collectChannelTransduced(channel);
+        
+        switch (channelSensors[channel]) {
+          
+            case SENSOR_CRMAG_200:
+              collectChannelTransduced(channel, channelSensors[channel]);
+              break;
+            case SENSOR_JD_500:
+              collectChannelTransduced(channel, channelSensors[channel]);
+              break;
+            case SENSOR_JD_250:
+              collectChannelTransduced(channel, channelSensors[channel]);
+              break;
+            case SENSOR_JD_100:
+              collectChannelTransduced(channel, channelSensors[channel]);
+              break;
+            default:
+                collectChannelRMS(channel);
+                break;
         }
+        
         energySum[channel] += energySumNow[channel];
+        
+        #ifdef HAS_SERIAL_MIRROR
+          // Listen and send on the serial mirror.
+          serialMirrorHandler();
+          mirror_samples = MIRROR_FREQUENCY;
+        #endif
     }
+}
+
+void collectChannelTransduced(int channel, int sensor_type) {
+    // For voltage output from an RMS processing sensor
+    watts_sum = 0.0;
+    for (int average = 0; average < AVERAGES; average++) {
+        // Process sub events and commands
+        subEvents();
+        
+        rms = 0.0;
+        for (int index = 0; index < SAMPLES; index++) {
+            //rms += 1023.0;
+            rms += (float) analogRead(pin);
+            
+            #ifdef HAS_SERIAL_MIRROR
+              // Listen and send on the serial mirror.
+              
+              if (mirror_samples == MIRROR_FREQUENCY) {
+                serialMirrorHandler();
+                mirror_samples = 0;
+              } else {
+                mirror_samples += 1;
+              }
+            #endif
+            
+        }
+        rms = rms / SAMPLES;
+        
+        //Serial.println(rms);
+        
+        switch (sensor_type) {
+            case SENSOR_CRMAG_200:
+              // Then work out in relation to the 200 amp sensor.
+              watts_sum += ((rms * (myAref / 1024)) / 5) * 200 * (float) MEASUREMENT_VOLTAGE *  (float) OUTPUT_MULTIPLIER * CALIBRATION_CRMAG_200;
+              break;
+            case SENSOR_JD_500:
+            // Then work out in relation to the 500 amp sensor, using a voltage divider to take from 5V to 1V.
+              watts_sum +=  ( rms / 1024) * myAref * 500 * (float) MEASUREMENT_VOLTAGE *  (float) OUTPUT_MULTIPLIER * CALIBRATION_JD_500;
+              break;
+            case SENSOR_JD_250:
+            // Then work out in relation to the 250 amp sensor, using a voltage divider to take from 5V to 1V.
+              watts_sum += ( rms / 1024) * myAref * 250 * (float) MEASUREMENT_VOLTAGE *  (float) OUTPUT_MULTIPLIER * CALIBRATION_JD_250;
+              break;
+            case SENSOR_JD_100:
+            // Then work out in relation to the 100 amp sensor, using a voltage divider to take from 5V to 1V.
+              watts_sum +=  ( rms / 1024) * myAref * 100 * (float) MEASUREMENT_VOLTAGE *  (float) OUTPUT_MULTIPLIER * CALIBRATION_JD_100;
+              break;
+            default:
+                watts_sum = -1.0;
+                break;
+        }
+        
+    }
+    watts[channel] = watts_sum / AVERAGES;
+    timeNow = millis(); // Mr Wolf.
+    if (timeNow > energySumTime[channel]) { // Sanity check, in case millis() wraps around
+        duration = timeNow - energySumTime[channel];
+        energySumNow[channel] = energySumNow[channel] + (watts[channel] * (duration / 1000.0 / 3600.0));
+    }
+    energySumTime[channel] = timeNow;
 }
 
 void collectChannelRMS(int channel) {
@@ -797,8 +908,19 @@ void collectChannelRMS(int channel) {
         for (int index = 0; index < SAMPLES; index++) {
             sample = analogRead(pin);
             rms += sq((float) sample);
+            
+            #ifdef HAS_SERIAL_MIRROR
+              // Listen and send on the serial mirror.
+              if (mirror_samples == MIRROR_FREQUENCY) {
+                serialMirrorHandler();
+                mirror_samples = 0;
+              } else {
+                mirror_samples += 1;
+              }
+            #endif
         }
-        
+       
+            
         rms = sqrt(rms / (SAMPLES / 2));
         watts_sum += calibrateRMS(channelSensors[channel], rms, channelPrimaryTurns[channel]);
     }
@@ -819,43 +941,27 @@ void collectChannelRMS(int channel) {
     energySumTime[channel] = timeNow;
 }
 
-void collectChannelTransduced(int channel) {
-    // For voltage output from an RMS processing sensor
-    watts_sum = 0.0;
-    for (int average = 0; average < AVERAGES; average++) {
-        // Process sub events and commands
-        subEvents();
-        
-        rms = 0.0;
-        for (int index = 0; index < SAMPLES; index++) {
-            //rms += 1023.0;
-            rms += (float) analogRead(pin);
-        }
-        rms = rms / SAMPLES;
-        // Then work out in relation to the 200 amp sensor.
-        watts_sum += (((rms * (myAref / 1024)) / 5) * 200) * (float) MEASUREMENT_VOLTAGE *  (float) OUTPUT_MULTIPLIER;
-    }
-    watts[channel] = watts_sum / AVERAGES;
-    timeNow = millis(); // Mr Wolf.
-    if (timeNow > energySumTime[channel]) { // Sanity check, in case millis() wraps around
-        duration = timeNow - energySumTime[channel];
-        energySumNow[channel] = energySumNow[channel] + (watts[channel] * (duration / 1000.0 / 3600.0));
-    }
-    energySumTime[channel] = timeNow;
-}
-
 float calibrateRMS(int sensor_type, float this_rms, float turns) {
     float output = 0.0;
 
-    
     if (this_rms > 0.01) {
         switch (sensor_type) {
             case SENSOR_SCT_013_030:
                 //Serial.println("SENSOR_SCT_013_030");
+                // Because these have a max output of 1V, adjust for 5V aRefs
+                this_rms = this_rms * (myAref / 1.1);
+                if (myAref == 5.0) {
+                  this_rms = this_rms * 1.025;
+                }
                 output = this_rms * CALIBRATION_SCT_013_030;
                 break;
             case SENSOR_SCT_013_060:
                 //Serial.println("SENSOR_SCT_013_060");
+                // Because these have a max output of 1V, adjust for 5V aRefs
+                this_rms = this_rms * (myAref / 1.1);
+                if (myAref == 5.0) {
+                  this_rms = this_rms * 1.025;
+                }
                 this_rms = this_rms * CALIBRATION_SCT_013_060;
                 output = nonLinearSCT_030_060_Calibration(this_rms);
                 output = correctNonLinearity(output);
@@ -869,6 +975,10 @@ float calibrateRMS(int sensor_type, float this_rms, float turns) {
             case SENSOR_JAYCAR_CLIP_AREF_1:
                 //Serial.println("SENSOR_JAYCAR_CLIP_AREF_1");
                 output = this_rms * CALIBRATION_JAYCAR_CLIP_AREF_1;
+                break;
+            case SENSOR_JAYCAR_CLIP_AREF_1_LOW:
+                //Serial.println("SENSOR_JAYCAR_CLIP_AREF_1_LOW");
+                output = this_rms * CALIBRATION_JAYCAR_CLIP_AREF_1_LOW;
                 break;
             case SENSOR_JAYCAR_CLIP_AREF_5:
                 //Serial.println("SENSOR_JAYCAR_CLIP_AREF_1");
@@ -933,6 +1043,12 @@ float correctNonLinearity(float this_rms) {
 }
 
 void powerOutputHandler() {
+  
+#ifdef HAS_SERIAL_MIRROR
+  // Listen and send on the serial mirror.
+  serialMirrorHandler();
+  mirror_samples = MIRROR_FREQUENCY;
+#endif
 
 #ifdef MULTI_PHASE
     //
@@ -1354,17 +1470,13 @@ byte serialMirrorInitialized = false;
 
 NewSoftSerial serialMirror = NewSoftSerial(SERIAL_MIRROR_RX_PIN, SERIAL_MIRROR_TX_PIN);
 
-#define SERIAL_MIRROR_BUFFER_SIZE 256
-
 void serialMirrorInitialize(void) {
-
     serialMirror.begin(DEFAULT_BAUD_RATE);
-
     serialMirrorInitialized = true;
 }
 
 void serialMirrorHandler(void) {
-    static char serialMirrorBuffer[SERIAL_MIRROR_BUFFER_SIZE];
+    static char serialMirrorBuffer[BUFFER_SIZE];
     static byte serialMirrorLength = 0;
     static long serialMirrorTimeOut = 0;
 
@@ -1372,40 +1484,51 @@ void serialMirrorHandler(void) {
 
     unsigned long timeNow = millis();
     int count = serialMirror.available();
-
+    
+    //Serial.println("In Serial mirror");
+    
     if (count == 0) {
         if (serialMirrorLength > 0) {
             if (timeNow > serialMirrorTimeOut) {
-                sendMessage("(error serialMirrorTimeout)");
+                Serial.println("(error serialMirrorTimeout)");
                 serialMirrorLength = 0;
-            }
+            } 
+        } else {
+          //Serial.println("Nothing on the serial mirror...");
         }
     } else {
 
+        /*
         globalString.begin();
         globalString = "(info readCount ";
         globalString += count;
         globalString += ")";
         sendMessage(globalString);
+        */
+        
+        //Serial.println(serialMirrorBuffer);
 
-
-        for (byte index = 0; index < count; index++) {
+        for (int index = 0; index < count; index++) {
+          
             char ch = serialMirror.read();
-
-            if (ch == '\n') continue;
-
+            
+            //Serial.print(ch);
+         
             if (serialMirrorLength >= (sizeof (serialMirrorBuffer) / sizeof (*serialMirrorBuffer))) {
-                sendMessage("(error serialMirrorBufferOverflow)");
+                Serial.println("(error serialMirrorBufferOverflow)");
+                serialMirrorBuffer[serialMirrorLength] = '\0';
                 serialMirrorLength = 0;
-            } else if (ch == '\r') {
+                Serial.println(serialMirrorBuffer);
+            } else if (ch == '\n' || ch == ';') {
                 serialMirrorBuffer[serialMirrorLength] = '\0'; // TODO: Check this working correctly, seems to be some problems when command is longer than buffer length ?!?
                 Serial.println(serialMirrorBuffer);
                 serialMirrorLength = 0;
+                break;
             } else {
                 serialMirrorBuffer[serialMirrorLength++] = ch;
+                //Serial.println(serialMirrorBuffer);
             }
         }
-
         serialMirrorTimeOut = timeNow + 20000;
     }
 }
