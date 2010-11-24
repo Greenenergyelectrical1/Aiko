@@ -1,3 +1,4 @@
+
 /* aiko_segmeter.pde
  * ~~~~~~~~~~~~~
  * Please do not remove the following notices.
@@ -67,7 +68,6 @@
  *   - This will be neater than the current ugly #ifdef / #endif arrangement.
  * - Implement: (update_rate SECONDS UNIT)
  * - Implement: (error on) (error off)
- * - Implement: (display_title= STRING) --> LCD position (0,0)
  * - Implement: (device_update NAME VALUE UNIT) or (NAME= VALUE)
  * - Implement: (profile)
  * - Implement: (clock yyyy-mm-ddThh:mm:ss)
@@ -92,9 +92,9 @@ using namespace Aiko;
 //#define IS_AIKO
 #define NOT_AIKO
 
-#define HAS_SERIAL_MIRROR
+//#define HAS_SERIAL_MIRROR
 
-#define DEFAULT_NODE_NAME "v12010_045"
+#define DEFAULT_NODE_NAME "segmeter"
 
 // This is only relevant if IS_AIKO
 #define DEFAULT_TRANSMIT_RATE    15  // seconds
@@ -107,8 +107,9 @@ using namespace Aiko;
  ** MULTI_PHASE - Channels 1-3 are Feed 1 and Channels 4-6 are Feed 2
  ** GROUPED - For other magic, see below.
  */
- 
+
 //#define COMMANDABLE
+
 
 #define SINGLE_PHASE
 //#define MULTI_PHASE
@@ -163,7 +164,7 @@ using namespace Aiko;
 #define OUTPUT_MULTIPLIER 1.0
 
 
-#define CHANNELS          6   // Current Clamp(s)
+#define CHANNELS          1   // Current Clamp(s)
 #define SAMPLES        1500  // Current samples to take
 #define AVERAGES          5   // Number of RMS values to average
 #define CYCLES           10   // Number of times to cycle through the calculations
@@ -218,7 +219,6 @@ using namespace Aiko;
 #define PIN_LIGHT_SENSOR    3
 #define PIN_VOLTAGE_SENSOR  4
 
-#include <PString.h>
 #define SEG_STRING_SIZE 11
 #define BUFFER_SIZE 250
 
@@ -228,8 +228,6 @@ int mirror_samples = MIRROR_FREQUENCY;
 
 char globalBuffer[BUFFER_SIZE]; // Used to manage dynamically constructed strings
 PString globalString(globalBuffer, sizeof (globalBuffer));
-
-//String segString = String(11);
 
 void (*commandHandlers[])() = {
     baudRateCommand,
@@ -325,10 +323,12 @@ void loop() {
  */
 void subEvents() {
   //Serial.println("Starting sub events...");
+#ifdef COMMANDABLE
   serialHandler();
   oneShotHandler();
-  
-  /* 
+#endif
+
+  /*
   * The Serial mirror handler is in a bunch of places, to service
   * the 64 byte buffer more frequently.  They are:
   * 1.  Here.
@@ -337,14 +337,14 @@ void subEvents() {
   * 4.  Transduced Sampling loop.
   * 5.  Power output handler
   */
-  
+
   #ifdef HAS_SERIAL_MIRROR
     // Listen and send on the serial mirror.
     serialMirrorHandler();
     mirror_samples = MIRROR_FREQUENCY;
   #endif
-  
-        
+
+
   //Serial.println("Finished with sub events...");
 }
 
@@ -381,120 +381,6 @@ void sendMessage(const char* message) {
     Serial.println(")");
 }
 
-/* -------------------------------------------------------------------------- */
-/*
- * Arduino serial buffer is 128 characters.
- * At 115,200 baud (11,520 cps) the buffer is filled 90 times per second.
- * Need to run this handler every 10 milliseconds.
- *
- * At 38,400 baud (3,840 cps) the buffer is filled 30 times per second.
- * Need to run this handler every 30 milliseconds.
- */
-
-byte serialHandlerInitialized = false;
-
-void serialHandlerInitialize(void) {
-    Serial.begin(DEFAULT_BAUD_RATE);
-    serialHandlerInitialized = true;
-}
-
-void serialHandler(void) {
-    static char buffer[32];
-    static byte length = 0;
-    static long timeOut = 0;
-
-    if (serialHandlerInitialized == false) serialHandlerInitialize();
-
-    unsigned long timeNow = millis();
-    int count = Serial.available();
-
-    if (count == 0) {
-        if (length > 0) {
-            if (timeNow > timeOut) {
-                //      sendMessage("(error timeout)");
-                length = 0;
-            }
-        }
-    } else {
-        /*  globalString.begin();
-         globalString  = "(info readCount ";
-         globalString += count;
-         globalString += ")";
-         sendMessage(globalString);
-         */
-        for (byte index = 0; index < count; index++) {
-            char ch = Serial.read();
-
-            if (length >= (sizeof (buffer) / sizeof (*buffer))) {
-                //      sendMessage("(error bufferOverflow)");
-                length = 0;
-            } else if (ch == '\n' || ch == ';') {
-                buffer[length] = '\0'; // TODO: Check this working correctly, seems to be some problems when command is longer than buffer length ?!?
-                parseCommand(buffer);
-                length = 0;
-            } else {
-                buffer[length++] = ch;
-            }
-        }
-
-        timeOut = timeNow + 5000;
-    }
-}
-
-void parseCommand(char* buffer) {
-
-    char* result = commandArray.parse(buffer); // TODO: Error handling when result == null
-    /*
-        for (int index = 0; index < commandArray.length(); index++) { // TODO: Check failure cases
-            Serial.println(index);
-            Serial.print("head: ");
-            Serial.println(commandArray[index].head());
-            Serial.println("Testing chop-----");
-            Serial.println(chop_string(commandArray[index].head(), commandArray[index].size()));
-            Serial.println("Done chop testing-----");
-        }
-     */
-    if (commandArray[0].isEqualTo(nodeName)) {
-        // Serial.println("...we have a node winner!");
-
-        // Make the SEG commands
-        seg_commands.parse(commandArray[1]);
-
-        String choppd = chop_string(seg_commands.head(), seg_commands.size());
-
-        if (strncmp(choppd, "relay", 5) == 0) {
-            // Serial.println("...we going to command the node now.");
-            relayCommand();
-
-        } else {
-            // Serial.println("...not commanding");
-        }
-
-    } else {
-        // Serial.println("...not for this node");
-    }
-}
-
-String chop_string(char* input, int chop_at) {
-    //Serial.println(input);
-    //Serial.println(chop_at);
-    String output(SEG_STRING_SIZE);
-
-    for (int index = 0; index < chop_at; index++) {
-        //Serial.println(input[index]);
-        if (input[index] != '(') {
-            output.append(input[index]);
-        }
-        if ((input[index] == ' ') && (index > 0)) {
-            break;
-        }
-        if (input[index] == ')') {
-            break;
-        }
-    }
-    //Serial.println(output);
-    return output;
-}
 
 /* --------------------------------------------------------------------------
  ** Blink routine, flashing
@@ -529,185 +415,15 @@ void flash(void) {
     digitalWrite(PIN_LED_STATUS, blinkStatus);
 }
 
+void quickFlashHandler(void) {
 
-/* --------------------------------------------------------------------------
- ** Relay handler
- */
-byte oneShotInitialised = false;
-byte relayInitialized = false;
-byte relayState;
-unsigned long relayTurnedOn = 0;
-unsigned long relayTimeNow = 0;
+    if (digitalRead(PIN_RELAY) == HIGH) {
+        if ((millis() - lastQuickFlash) > QUICK_FLASH_TIME) {
 
-String energise;
-int energise_time;
-String seg_command_id;
-String command_response;
-
-void relayInitialize(void) {
-    pinMode(PIN_RELAY, OUTPUT);
-    relayInitialized = true;
-}
-
-void relayCommand(void) {
-  
-    command_response = "Error";
-    
-    if (relayInitialized == false) relayInitialize();
-
-    setRelayParameters();
-    
-    //Serial.println(energise);
-    //Serial.println(energise_time);
-    //Serial.println(seg_command_id);
-    //Serial.println(command_response);
-
-    if (strncmp(energise, "on", 2) == 0) {
-        digitalWrite(PIN_RELAY, HIGH);
-        relayTurnedOn = millis();
-        command_response = "Complete";
-
-    } else if (strncmp(energise, "off", 3) == 0) {
-        digitalWrite(PIN_RELAY, LOW);
-        relayTurnedOn = 0;
-        command_response = "Complete";
-    } else {
-        //  Do nothing, sending stuff here messes the mesh.
-        //  Rebroadcast the command and check at the start wether it's for this node.
-        //  sendMessage("(error parameterInvalid)");
-    }
-    completeRelayCommand();
-}
-
-void setRelayParameters() {
-
-    String choppd;
-    
-    for (int index = 0; index < seg_commands.length(); index++) {
-
-      /*
-        Serial.println(index);
-        Serial.print("head: ");
-        Serial.println(seg_commands[index].head());
-        Serial.println("Testing chop-----");
-        Serial.println(chop_string(seg_commands[index].head(), seg_commands[index].size()));
-        Serial.println("Done chop testing-----");
-      */
-        choppd = chop_string(seg_commands[index].head(), seg_commands[index].size());
-        
-        //Serial.println(choppd);
-        
-        switch (index) {
-            case 0:
-                // Command name nothing to do here
-                break;
-            case 1:
-                // Energise setting
-                energise = choppd;
-                break;
-            case 2:
-                //Serial.println(choppd);
-                
-                if (choppd.charAt(0) != '?') {
-                    energise_time = atoi(choppd);
-                } else {
-                    energise_time = 0;  // 0 Implies that the relay will remain ON, ie. is_one_shot test == 0 for false
-                }
-                
-                break;
-                
-            case 3:
-                seg_command_id = choppd;
-                break;
-            default:
-                break;
+            blinkHandler();
+            lastQuickFlash = millis();
         }
     }
-}
-
-void completeRelayCommand() {
-
-    globalString.begin();
-    globalString += "(relay ";
-    globalString += energise;
-    globalString += " ";
-    globalString += energise_time;
-    globalString += " ";
-    globalString += seg_command_id;
-    globalString += " ";
-    globalString += command_response;
-    globalString += ")";
-
-    sendMessage(globalString);
-}
-
-
-/* --------------------------------------------------------------------------
- ** Works out if to shut the relay off or not
- */
-
-void oneShotInitialise(void) {
-    oneShotInitialised = true;
-}
-
-void oneShotHandler(void) {
-    if (oneShotInitialised == false) oneShotInitialise();
-
-    if (energise_time > 0) {
-      relayState = digitalRead(PIN_RELAY);
-      relayTimeNow = millis();
-      if (relayState == HIGH) {
-          if (relayTimeNow > relayTurnedOn) {
-              //if ((relayTimeNow - relayTurnedOn) > ONE_SHOT_TIME) {
-              if ((relayTimeNow - relayTurnedOn) > (energise_time * 1000)) {
-                  turnRelayOff();
-              }
-          } else {
-              // We have a rollover, so turn eet off
-              turnRelayOff();
-          }
-      }
-    }
-}
-
-void turnRelayOff(void) {
-
-    digitalWrite(PIN_RELAY, LOW);
-    relayMessager("(relay off)");
-}
-
-/* --------------------------------------------------------------------------
- **  Reports the relay status
- */
-
-byte relayStateInitialized = false;
-byte thisRelayState = 0;
-
-void relayStateInitialize(void) {
-
-    relayStateInitialized = true;
-}
-
-void relayStateHandler(void) {
-    if (relayStateInitialized == false) relayStateInitialize();
-
-    // Just report the relay's state
-    if (digitalRead(PIN_RELAY) == HIGH) {
-        relayMessager("(relay 1 number)");
-    } else {
-
-        relayMessager("(relay 0 number)");
-    }
-}
-
-void relayMessager(char* message) {
-
-    globalString.begin();
-    globalString += "(";
-    globalString += message;
-    globalString += ")";
-
-    sendMessage(globalString);
 }
 
 /* --------------------------------------------------------------------------
@@ -764,19 +480,19 @@ void segMeterInitialise(void) {
     }
 
     channelSensors[0] = SENSOR_SCT_013_060;
-    channelSensors[1] = SENSOR_SCT_013_060;
-    channelSensors[2] = SENSOR_SCT_013_060;
-    channelSensors[3] = SENSOR_SCT_013_060;
-    channelSensors[4] = SENSOR_SCT_013_060;
-    channelSensors[5] = SENSOR_SCT_013_060;
-   
+    //channelSensors[1] = SENSOR_SCT_013_060;
+    //channelSensors[2] = SENSOR_SCT_013_060;
+    //channelSensors[3] = SENSOR_SCT_013_060;
+    //channelSensors[4] = SENSOR_SCT_013_060;
+    //channelSensors[5] = SENSOR_SCT_013_060;
+
     // Channel trim, add this value to the power reading
     channelTrim[0] = 0;
-    channelTrim[1] = 0;
-    channelTrim[2] = 0;
-    channelTrim[3] = 0;
-    channelTrim[4] = 0;
-    channelTrim[5] = 0;
+    //channelTrim[1] = 0;
+    //channelTrim[2] = 0;
+    //channelTrim[3] = 0;
+    //channelTrim[4] = 0;
+    //channelTrim[5] = 0;
 
     segMeterInitialised = true;
 }
@@ -799,9 +515,9 @@ void collectChannels() {
         flash(); // a little message that we are collecting.
         energySumNow[channel] = 0;
         // TODO Magic here to deermine collection method
-        
+
         switch (channelSensors[channel]) {
-          
+
             case SENSOR_CRMAG_200:
               collectChannelTransduced(channel, channelSensors[channel]);
               break;
@@ -818,9 +534,9 @@ void collectChannels() {
                 collectChannelRMS(channel);
                 break;
         }
-        
+
         energySum[channel] += energySumNow[channel];
-        
+
         #ifdef HAS_SERIAL_MIRROR
           // Listen and send on the serial mirror.
           serialMirrorHandler();
@@ -835,15 +551,15 @@ void collectChannelTransduced(int channel, int sensor_type) {
     for (int average = 0; average < AVERAGES; average++) {
         // Process sub events and commands
         subEvents();
-        
+
         rms = 0.0;
         for (int index = 0; index < SAMPLES; index++) {
             //rms += 1023.0;
             rms += (float) analogRead(pin);
-            
+
             #ifdef HAS_SERIAL_MIRROR
               // Listen and send on the serial mirror.
-              
+
               if (mirror_samples == MIRROR_FREQUENCY) {
                 serialMirrorHandler();
                 mirror_samples = 0;
@@ -851,12 +567,12 @@ void collectChannelTransduced(int channel, int sensor_type) {
                 mirror_samples += 1;
               }
             #endif
-            
+
         }
         rms = rms / SAMPLES;
-        
+
         //Serial.println(rms);
-        
+
         switch (sensor_type) {
             case SENSOR_CRMAG_200:
               // Then work out in relation to the 200 amp sensor.
@@ -878,7 +594,7 @@ void collectChannelTransduced(int channel, int sensor_type) {
                 watts_sum = -1.0;
                 break;
         }
-        
+
     }
     watts[channel] = watts_sum / AVERAGES;
     timeNow = millis(); // Mr Wolf.
@@ -895,12 +611,12 @@ void collectChannelRMS(int channel) {
     for (int average = 0; average < AVERAGES; average++) {
         // Process sub events and commands
         subEvents();
-      
+
         rms = 0.0;
         for (int index = 0; index < SAMPLES; index++) {
             sample = analogRead(pin);
             rms += sq((float) sample);
-            
+
             #ifdef HAS_SERIAL_MIRROR
               // Listen and send on the serial mirror.
               if (mirror_samples == MIRROR_FREQUENCY) {
@@ -911,12 +627,12 @@ void collectChannelRMS(int channel) {
               }
             #endif
         }
-       
-            
+
+
         rms = sqrt(rms / (SAMPLES / 2));
         watts_sum += calibrateRMS(channelSensors[channel], rms);
     }
-        
+
     // Apply the channel trim.
     watts[channel] = (watts_sum / AVERAGES) + channelTrim[channel];
 
@@ -962,8 +678,8 @@ float calibrateRMS(int sensor_type, float this_rms) {
             case SENSOR_CSLT:
                 //Serial.println("SENSOR_CSLT");
                 this_rms = this_rms * CALIBRATION_CSLT;
-                output = nonLinearCSLT_Calibration(this_rms);  
-                output = correctNonLinearity(output); 
+                output = nonLinearCSLT_Calibration(this_rms);
+                output = correctNonLinearity(output);
                 break;
             case SENSOR_JAYCAR_CLIP_AREF_1:
                 //Serial.println("SENSOR_JAYCAR_CLIP_AREF_1");
@@ -1058,7 +774,7 @@ float correctNonLinearity(float this_rms) {
 }
 
 void powerOutputHandler() {
-  
+
 #ifdef HAS_SERIAL_MIRROR
   // Listen and send on the serial mirror.
   serialMirrorHandler();
@@ -1249,17 +965,6 @@ void powerOutputHandler() {
 
 #endif
 
-void quickFlashHandler(void) {
-
-    if (digitalRead(PIN_RELAY) == HIGH) {
-        if ((millis() - lastQuickFlash) > QUICK_FLASH_TIME) {
-
-            blinkHandler();
-            lastQuickFlash = millis();
-        }
-    }
-}
-
 /* --------------------------------------------------------------------------
  ** Voltage Sensor
  */
@@ -1313,8 +1018,6 @@ void resetClockCommand(void) {
     second = minute = hour = 0;
 }
 
-#ifdef IS_3_CHANNEL
-
 /* --------------------------------------------------------------------------
  ** Light Sensor Handler
  */
@@ -1332,7 +1035,6 @@ void lightSensorHandler(void) {
     sendMessage(globalString);
 }
 
-#endif
 
 /* --------------------------------------------------------------------------
  ** Temperature Sensor
@@ -1449,6 +1151,305 @@ void temperatureSensorHandler(void) { // total time: 33 milliseconds
     oneWireInitialized = true;
 }
 
+#ifdef COMMANDABLE
+/* -------------------------------------------------------------------------- */
+/*
+ * Arduino serial buffer is 128 characters.
+ * At 115,200 baud (11,520 cps) the buffer is filled 90 times per second.
+ * Need to run this handler every 10 milliseconds.
+ *
+ * At 38,400 baud (3,840 cps) the buffer is filled 30 times per second.
+ * Need to run this handler every 30 milliseconds.
+ */
+
+byte serialHandlerInitialized = false;
+
+void serialHandlerInitialize(void) {
+    Serial.begin(DEFAULT_BAUD_RATE);
+    serialHandlerInitialized = true;
+}
+
+
+void serialHandler(void) {
+    static char buffer[32];
+    static byte length = 0;
+    static long timeOut = 0;
+
+    if (serialHandlerInitialized == false) serialHandlerInitialize();
+
+    unsigned long timeNow = millis();
+    int count = Serial.available();
+
+    if (count == 0) {
+        if (length > 0) {
+            if (timeNow > timeOut) {
+                //      sendMessage("(error timeout)");
+                length = 0;
+            }
+        }
+    } else {
+        /*  globalString.begin();
+         globalString  = "(info readCount ";
+         globalString += count;
+         globalString += ")";
+         sendMessage(globalString);
+         */
+        for (byte index = 0; index < count; index++) {
+            char ch = Serial.read();
+
+            if (length >= (sizeof (buffer) / sizeof (*buffer))) {
+                //      sendMessage("(error bufferOverflow)");
+                length = 0;
+            } else if (ch == '\n' || ch == ';') {
+                buffer[length] = '\0'; // TODO: Check this working correctly, seems to be some problems when command is longer than buffer length ?!?
+                parseCommand(buffer);
+                length = 0;
+            } else {
+                buffer[length++] = ch;
+            }
+        }
+
+        timeOut = timeNow + 5000;
+    }
+}
+
+void parseCommand(char* buffer) {
+
+    char* result = commandArray.parse(buffer); // TODO: Error handling when result == null
+    /*
+        for (int index = 0; index < commandArray.length(); index++) { // TODO: Check failure cases
+            Serial.println(index);
+            Serial.print("head: ");
+            Serial.println(commandArray[index].head());
+            Serial.println("Testing chop-----");
+            Serial.println(chop_string(commandArray[index].head(), commandArray[index].size()));
+            Serial.println("Done chop testing-----");
+        }
+     */
+    if (commandArray[0].isEqualTo(nodeName)) {
+        // Serial.println("...we have a node winner!");
+
+        // Make the SEG commands
+        seg_commands.parse(commandArray[1]);
+
+        String choppd = chop_string(seg_commands.head(), seg_commands.size());
+
+        if (strncmp(choppd, "relay", 5) == 0) {
+            // Serial.println("...we going to command the node now.");
+            relayCommand();
+
+        } else {
+            // Serial.println("...not commanding");
+        }
+
+    } else {
+        // Serial.println("...not for this node");
+    }
+}
+
+
+String chop_string(char* input, int chop_at) {
+    //Serial.println(input);
+    //Serial.println(chop_at);
+    String output(SEG_STRING_SIZE);
+
+    for (int index = 0; index < chop_at; index++) {
+        //Serial.println(input[index]);
+        if (input[index] != '(') {
+            output.append(input[index]);
+        }
+        if ((input[index] == ' ') && (index > 0)) {
+            break;
+        }
+        if (input[index] == ')') {
+            break;
+        }
+    }
+    //Serial.println(output);
+    return output;
+}
+
+
+/* --------------------------------------------------------------------------
+ ** Relay handler
+ */
+byte oneShotInitialised = false;
+byte relayInitialized = false;
+byte relayState;
+unsigned long relayTurnedOn = 0;
+unsigned long relayTimeNow = 0;
+
+String energise;
+int energise_time;
+String seg_command_id;
+String command_response;
+
+void relayInitialize(void) {
+    pinMode(PIN_RELAY, OUTPUT);
+    relayInitialized = true;
+}
+
+void relayCommand(void) {
+
+    command_response = "error";
+
+    if (relayInitialized == false) relayInitialize();
+
+    setRelayParameters();
+
+    //Serial.println(energise);
+    //Serial.println(energise_time);
+    //Serial.println(seg_command_id);
+    //Serial.println(command_response);
+
+    command_response = "pending";
+
+    if (strncmp(energise, "on", 2) == 0) {
+        digitalWrite(PIN_RELAY, HIGH);
+        relayTurnedOn = millis();
+        command_response = "complete";
+
+    } else if (strncmp(energise, "off", 3) == 0) {
+        digitalWrite(PIN_RELAY, LOW);
+        relayTurnedOn = 0;
+        command_response = "complete";
+    } else {
+        //  Do nothing, sending stuff here messes the mesh.
+        //  Rebroadcast the command and check at the start wether it's for this node.
+        //  sendMessage("(error parameterInvalid)");
+    }
+    completeRelayCommand();
+}
+
+void setRelayParameters() {
+
+    String choppd;
+
+    for (int index = 0; index < seg_commands.length(); index++) {
+
+      /*
+        Serial.println(index);
+        Serial.print("head: ");
+        Serial.println(seg_commands[index].head());
+        Serial.println("Testing chop-----");
+        Serial.println(chop_string(seg_commands[index].head(), seg_commands[index].size()));
+        Serial.println("Done chop testing-----");
+      */
+        choppd = chop_string(seg_commands[index].head(), seg_commands[index].size());
+
+        //Serial.println(choppd);
+
+        switch (index) {
+            case 0:
+                // Command name nothing to do here
+                break;
+            case 1:
+                // Energise setting
+                energise = choppd;
+                break;
+            case 2:
+                //Serial.println(choppd);
+
+                if (choppd.charAt(0) != '?') {
+                    energise_time = atoi(choppd);
+                } else {
+                    energise_time = 0;  // 0 Implies that the relay will remain ON, ie. is_one_shot test == 0 for false
+                }
+                break;
+
+            case 3:
+                seg_command_id = choppd;
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+void completeRelayCommand() {
+
+    globalString.begin();
+
+    globalString += "(command ";
+    globalString += seg_command_id;
+    globalString += " ";
+    globalString += command_response;
+    globalString += ")";
+
+    sendMessage(globalString);
+}
+
+
+/* --------------------------------------------------------------------------
+ ** Works out if to shut the relay off or not
+ */
+
+void oneShotInitialise(void) {
+    oneShotInitialised = true;
+}
+
+void oneShotHandler(void) {
+    if (oneShotInitialised == false) oneShotInitialise();
+
+    if (energise_time > 0) {
+      relayState = digitalRead(PIN_RELAY);
+      relayTimeNow = millis();
+      if (relayState == HIGH) {
+          if (relayTimeNow > relayTurnedOn) {
+              //if ((relayTimeNow - relayTurnedOn) > ONE_SHOT_TIME) {
+              if ((relayTimeNow - relayTurnedOn) > (energise_time * 1000)) {
+                  turnRelayOff();
+              }
+          } else {
+              // We have a rollover, so turn eet off
+              turnRelayOff();
+          }
+      }
+    }
+}
+
+void turnRelayOff(void) {
+
+    digitalWrite(PIN_RELAY, LOW);
+    relayMessager("(relay off)");
+}
+
+/* --------------------------------------------------------------------------
+ **  Reports the relay status
+ */
+
+byte relayStateInitialized = false;
+byte thisRelayState = 0;
+
+void relayStateInitialize(void) {
+
+    relayStateInitialized = true;
+}
+
+void relayStateHandler(void) {
+    if (relayStateInitialized == false) relayStateInitialize();
+
+    // Just report the relay's state
+    if (digitalRead(PIN_RELAY) == HIGH) {
+        relayMessager("(relay 1 number)");
+    } else {
+
+        relayMessager("(relay 0 number)");
+    }
+}
+
+void relayMessager(char* message) {
+
+    globalString.begin();
+    globalString += "(";
+    globalString += message;
+    globalString += ")";
+
+    sendMessage(globalString);
+}
+
+#endif
+
 
 /* --------------------------------------------------------------------------
  ** Baud Rate Handler
@@ -1499,15 +1500,15 @@ void serialMirrorHandler(void) {
 
     unsigned long timeNow = millis();
     int count = serialMirror.available();
-    
+
     //Serial.println("In Serial mirror");
-    
+
     if (count == 0) {
         if (serialMirrorLength > 0) {
             if (timeNow > serialMirrorTimeOut) {
                 Serial.println("(error serialMirrorTimeout)");
                 serialMirrorLength = 0;
-            } 
+            }
         } else {
           //Serial.println("Nothing on the serial mirror...");
         }
@@ -1520,15 +1521,15 @@ void serialMirrorHandler(void) {
         globalString += ")";
         sendMessage(globalString);
         */
-        
+
         //Serial.println(serialMirrorBuffer);
 
         for (int index = 0; index < count; index++) {
-          
+
             char ch = serialMirror.read();
-            
+
             //Serial.print(ch);
-         
+
             if (serialMirrorLength >= (sizeof (serialMirrorBuffer) / sizeof (*serialMirrorBuffer))) {
                 Serial.println("(error serialMirrorBufferOverflow)");
                 serialMirrorBuffer[serialMirrorLength] = '\0';
