@@ -98,7 +98,6 @@ using namespace Aiko;
 
 // This is only relevant if IS_AIKO
 #define DEFAULT_TRANSMIT_RATE    15  // seconds
-//#define STONE_DEBUG  // Enable capture and dump of all sampled values
 
 /*
  ** Phase Options
@@ -164,10 +163,10 @@ using namespace Aiko;
 #define OUTPUT_MULTIPLIER 1.0
 
 
-#define CHANNELS          1   // Current Clamp(s)
+#define CHANNELS          6   // Current Clamp(s)
 #define SAMPLES        1500  // Current samples to take
 #define AVERAGES          5   // Number of RMS values to average
-#define CYCLES           10   // Number of times to cycle through the calculations
+#define CYCLES           20   // Number of times to cycle through the calculations
 
 #define DEFAULT_BAUD_RATE     38400
 #define ONE_SHOT_TIME         180000
@@ -364,7 +363,6 @@ void nodeCommand(void) {
     for (byte index = 0; index < sizeof (nodeName); index++) {
         if (index == parameter.size()) {
             nodeName[index] = '\0';
-
             break;
         }
 
@@ -480,19 +478,19 @@ void segMeterInitialise(void) {
     }
 
     channelSensors[0] = SENSOR_SCT_013_060;
-    //channelSensors[1] = SENSOR_SCT_013_060;
-    //channelSensors[2] = SENSOR_SCT_013_060;
-    //channelSensors[3] = SENSOR_SCT_013_060;
-    //channelSensors[4] = SENSOR_SCT_013_060;
-    //channelSensors[5] = SENSOR_SCT_013_060;
+    channelSensors[1] = SENSOR_SCT_013_060;
+    channelSensors[2] = SENSOR_SCT_013_060;
+    channelSensors[3] = SENSOR_SCT_013_060;
+    channelSensors[4] = SENSOR_SCT_013_060;
+    channelSensors[5] = SENSOR_SCT_013_060;
 
     // Channel trim, add this value to the power reading
     channelTrim[0] = 0;
-    //channelTrim[1] = 0;
-    //channelTrim[2] = 0;
-    //channelTrim[3] = 0;
-    //channelTrim[4] = 0;
-    //channelTrim[5] = 0;
+    channelTrim[1] = 0;
+    channelTrim[2] = 0;
+    channelTrim[3] = 0;
+    channelTrim[4] = 0;
+    channelTrim[5] = 0;
 
     segMeterInitialised = true;
 }
@@ -708,46 +706,45 @@ float calibrateRMS(int sensor_type, float this_rms) {
 float nonLinearSCT_030_060_Calibration(float this_rms) {
     // Designed now for the non linear behaviour of the SCT_013_060 sensor
     float output = 0.0;
-    if (this_rms <= 160) {
+    if (this_rms <= 160.0) {
         output = this_rms * 0.93;
     } else {
-
         output = (this_rms + 25.52) / 1.44;
     }
     return output;
 }
 
-
 float correct_SCT_030_060(float this_rms) {
     // Post calibtration routine to correct variances.
     float output = 0.0;
-    if (this_rms <= 80) {
+   
+    if (this_rms <= 80.0) {
         output = this_rms;
-    } else if (this_rms > 80 && this_rms <= 100) {
-        // y = 0.333x -26.7 where y is the output
-        output = this_rms * 0.333 - 26.7;
-    } else if (this_rms > 100 && this_rms <= 250) {
+    } else if (this_rms > 80.0 && this_rms <= 100.0) {
+        // y = 1.5x - 40 where y is the output
+        output = this_rms * 1.5 - 40;
+    } else if (this_rms > 100.0 && this_rms <= 250.0) {
         // y = x + 10  where y is the output
-        output = this_rms + 10;
-    } else if (this_rms > 250 && this_rms <= 320) {
+        output = this_rms + 10.0;
+    } else if (this_rms > 250.0 && this_rms <= 320.0) {
         // y = 1.43x -97.1  where y is the output
         output = this_rms * 1.43 - 97.1;
     } else {
         output = this_rms + 40.0;
     }
+    
     return output;
 }
 
-
 float nonLinearCSLT_Calibration(float this_rms) {
-    // Designed now for the non linear behaviour of the SCT_013_060 sensor
+    // Designed now for the non linear behaviour
     float output = 0.0;
-    if (this_rms <= 108) {
+    if (this_rms <= 108.0) {
         // Subtract a reverse curve
-        output = this_rms + ((108 - this_rms) * 0.09);
-    } else if (this_rms > 108 && this_rms <= 325) {
+        output = this_rms + ((108.0 - this_rms) * 0.09);
+    } else if (this_rms > 108.0 && this_rms <= 325.0) {
         // linear,           # y = 1.36x - 35.5
-        output = (this_rms + 35) / 1.35;
+        output = (this_rms + 35.0) / 1.35;
     } else {
         // linear,           # y = 1.338x - 90.58
 
@@ -759,16 +756,16 @@ float nonLinearCSLT_Calibration(float this_rms) {
 float correctNonLinearity(float this_rms) {
     // It appears the way the Arduino is sensing, is that an positive nonlinearity is experienced as the current increases.
     float output = 0.0;
-    if (this_rms <= 3599) {
+    if (this_rms <= 3599.0) {
         // Linear
         output = this_rms;
-    } else if (this_rms > 3599 && this_rms <= 7708) {
+    } else if (this_rms > 3599.0 && this_rms <= 7708.0) {
         // linear,           # y = 2.14x - 4100
-        output = (this_rms + 4100) / 2.14;
-    } else if (this_rms > 7709) {
+        output = (this_rms + 4100.0) / 2.14;
+    } else if (this_rms > 7709.0) {
         // linear,           # y = 1.86x - 4755
 
-        output = (this_rms + 4755) / 1.86;
+        output = (this_rms + 4755.0) / 1.86;
     }
     return output;
 }
