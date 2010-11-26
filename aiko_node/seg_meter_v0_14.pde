@@ -1,4 +1,3 @@
-
 /* aiko_segmeter.pde
  * ~~~~~~~~~~~~~
  * Please do not remove the following notices.
@@ -68,6 +67,7 @@
  *   - This will be neater than the current ugly #ifdef / #endif arrangement.
  * - Implement: (update_rate SECONDS UNIT)
  * - Implement: (error on) (error off)
+ * - Implement: (display_title= STRING) --> LCD position (0,0)
  * - Implement: (device_update NAME VALUE UNIT) or (NAME= VALUE)
  * - Implement: (profile)
  * - Implement: (clock yyyy-mm-ddThh:mm:ss)
@@ -92,12 +92,13 @@ using namespace Aiko;
 //#define IS_AIKO
 #define NOT_AIKO
 
-//#define HAS_SERIAL_MIRROR
+#define HAS_SERIAL_MIRROR
 
 #define DEFAULT_NODE_NAME "segmeter"
 
 // This is only relevant if IS_AIKO
 #define DEFAULT_TRANSMIT_RATE    15  // seconds
+//#define STONE_DEBUG  // Enable capture and dump of all sampled values
 
 /*
  ** Phase Options
@@ -106,9 +107,8 @@ using namespace Aiko;
  ** MULTI_PHASE - Channels 1-3 are Feed 1 and Channels 4-6 are Feed 2
  ** GROUPED - For other magic, see below.
  */
-
-//#define COMMANDABLE
-
+ 
+#define COMMANDABLE
 
 #define SINGLE_PHASE
 //#define MULTI_PHASE
@@ -166,7 +166,7 @@ using namespace Aiko;
 #define CHANNELS          6   // Current Clamp(s)
 #define SAMPLES        1500  // Current samples to take
 #define AVERAGES          5   // Number of RMS values to average
-#define CYCLES           20   // Number of times to cycle through the calculations
+#define CYCLES            6   // Number of times to cycle through the calculations
 
 #define DEFAULT_BAUD_RATE     38400
 #define ONE_SHOT_TIME         180000
@@ -218,6 +218,7 @@ using namespace Aiko;
 #define PIN_LIGHT_SENSOR    3
 #define PIN_VOLTAGE_SENSOR  4
 
+#include <PString.h>
 #define SEG_STRING_SIZE 11
 #define BUFFER_SIZE 250
 
@@ -227,6 +228,8 @@ int mirror_samples = MIRROR_FREQUENCY;
 
 char globalBuffer[BUFFER_SIZE]; // Used to manage dynamically constructed strings
 PString globalString(globalBuffer, sizeof (globalBuffer));
+
+//String segString = String(11);
 
 void (*commandHandlers[])() = {
     baudRateCommand,
@@ -313,6 +316,8 @@ void loop() {
     //nodeHandler();
     powerOutputHandler();
     temperatureSensorHandler();
+    temperatureSensorHandler();
+    
 #endif
 }
 
@@ -322,12 +327,10 @@ void loop() {
  */
 void subEvents() {
   //Serial.println("Starting sub events...");
-#ifdef COMMANDABLE
   serialHandler();
   oneShotHandler();
-#endif
-
-  /*
+  
+  /* 
   * The Serial mirror handler is in a bunch of places, to service
   * the 64 byte buffer more frequently.  They are:
   * 1.  Here.
@@ -336,14 +339,14 @@ void subEvents() {
   * 4.  Transduced Sampling loop.
   * 5.  Power output handler
   */
-
+  
   #ifdef HAS_SERIAL_MIRROR
     // Listen and send on the serial mirror.
     serialMirrorHandler();
     mirror_samples = MIRROR_FREQUENCY;
   #endif
-
-
+  
+        
   //Serial.println("Finished with sub events...");
 }
 
@@ -363,6 +366,7 @@ void nodeCommand(void) {
     for (byte index = 0; index < sizeof (nodeName); index++) {
         if (index == parameter.size()) {
             nodeName[index] = '\0';
+
             break;
         }
 
@@ -378,6 +382,7 @@ void sendMessage(const char* message) {
     Serial.print(message);
     Serial.println(")");
 }
+
 
 
 /* --------------------------------------------------------------------------
@@ -413,6 +418,8 @@ void flash(void) {
     digitalWrite(PIN_LED_STATUS, blinkStatus);
 }
 
+
+
 void quickFlashHandler(void) {
 
     if (digitalRead(PIN_RELAY) == HIGH) {
@@ -423,6 +430,7 @@ void quickFlashHandler(void) {
         }
     }
 }
+
 
 /* --------------------------------------------------------------------------
  ** Current measurement oscillating around zero volts.
@@ -478,12 +486,12 @@ void segMeterInitialise(void) {
     }
 
     channelSensors[0] = SENSOR_SCT_013_060;
-    channelSensors[1] = SENSOR_SCT_013_060;
-    channelSensors[2] = SENSOR_SCT_013_060;
-    channelSensors[3] = SENSOR_SCT_013_060;
-    channelSensors[4] = SENSOR_SCT_013_060;
+    channelSensors[1] = SENSOR_CSLT;
+    channelSensors[2] = SENSOR_CSLT;
+    channelSensors[3] = SENSOR_CSLT;
+    channelSensors[4] = SENSOR_CSLT;
     channelSensors[5] = SENSOR_SCT_013_060;
-
+   
     // Channel trim, add this value to the power reading
     channelTrim[0] = 0;
     channelTrim[1] = 0;
@@ -513,9 +521,9 @@ void collectChannels() {
         flash(); // a little message that we are collecting.
         energySumNow[channel] = 0;
         // TODO Magic here to deermine collection method
-
+        
         switch (channelSensors[channel]) {
-
+          
             case SENSOR_CRMAG_200:
               collectChannelTransduced(channel, channelSensors[channel]);
               break;
@@ -532,9 +540,9 @@ void collectChannels() {
                 collectChannelRMS(channel);
                 break;
         }
-
+        
         energySum[channel] += energySumNow[channel];
-
+        
         #ifdef HAS_SERIAL_MIRROR
           // Listen and send on the serial mirror.
           serialMirrorHandler();
@@ -549,15 +557,15 @@ void collectChannelTransduced(int channel, int sensor_type) {
     for (int average = 0; average < AVERAGES; average++) {
         // Process sub events and commands
         subEvents();
-
+        
         rms = 0.0;
         for (int index = 0; index < SAMPLES; index++) {
             //rms += 1023.0;
             rms += (float) analogRead(pin);
-
+            
             #ifdef HAS_SERIAL_MIRROR
               // Listen and send on the serial mirror.
-
+              
               if (mirror_samples == MIRROR_FREQUENCY) {
                 serialMirrorHandler();
                 mirror_samples = 0;
@@ -565,12 +573,12 @@ void collectChannelTransduced(int channel, int sensor_type) {
                 mirror_samples += 1;
               }
             #endif
-
+            
         }
         rms = rms / SAMPLES;
-
+        
         //Serial.println(rms);
-
+        
         switch (sensor_type) {
             case SENSOR_CRMAG_200:
               // Then work out in relation to the 200 amp sensor.
@@ -592,7 +600,7 @@ void collectChannelTransduced(int channel, int sensor_type) {
                 watts_sum = -1.0;
                 break;
         }
-
+        
     }
     watts[channel] = watts_sum / AVERAGES;
     timeNow = millis(); // Mr Wolf.
@@ -609,12 +617,12 @@ void collectChannelRMS(int channel) {
     for (int average = 0; average < AVERAGES; average++) {
         // Process sub events and commands
         subEvents();
-
+      
         rms = 0.0;
         for (int index = 0; index < SAMPLES; index++) {
             sample = analogRead(pin);
             rms += sq((float) sample);
-
+            
             #ifdef HAS_SERIAL_MIRROR
               // Listen and send on the serial mirror.
               if (mirror_samples == MIRROR_FREQUENCY) {
@@ -625,12 +633,12 @@ void collectChannelRMS(int channel) {
               }
             #endif
         }
-
-
+       
+            
         rms = sqrt(rms / (SAMPLES / 2));
         watts_sum += calibrateRMS(channelSensors[channel], rms);
     }
-
+        
     // Apply the channel trim.
     watts[channel] = (watts_sum / AVERAGES) + channelTrim[channel];
 
@@ -676,8 +684,8 @@ float calibrateRMS(int sensor_type, float this_rms) {
             case SENSOR_CSLT:
                 //Serial.println("SENSOR_CSLT");
                 this_rms = this_rms * CALIBRATION_CSLT;
-                output = nonLinearCSLT_Calibration(this_rms);
-                output = correctNonLinearity(output);
+                output = nonLinearCSLT_Calibration(this_rms);  
+                output = correctNonLinearity(output); 
                 break;
             case SENSOR_JAYCAR_CLIP_AREF_1:
                 //Serial.println("SENSOR_JAYCAR_CLIP_AREF_1");
@@ -702,6 +710,7 @@ float calibrateRMS(int sensor_type, float this_rms) {
     }
     return output;
 }
+
 
 float nonLinearSCT_030_060_Calibration(float this_rms) {
     // Designed now for the non linear behaviour of the SCT_013_060 sensor
@@ -771,7 +780,7 @@ float correctNonLinearity(float this_rms) {
 }
 
 void powerOutputHandler() {
-
+  
 #ifdef HAS_SERIAL_MIRROR
   // Listen and send on the serial mirror.
   serialMirrorHandler();
@@ -962,193 +971,9 @@ void powerOutputHandler() {
 
 #endif
 
-/* --------------------------------------------------------------------------
- ** Voltage Sensor
- */
-
-float voltageRaw = 0;
-float voltageValue = 0;
-
-void voltageSensorHandler(void) {
-
-    voltageValue = 0;
-
-    voltageRaw = analogRead(PIN_VOLTAGE_SENSOR);
-
-    // Divide out the ratio from the ADC and multiply by Aref
-    // Then multiply by 3 (note R1 = 200 and R2 = 100)
-    voltageValue = (voltageRaw / 1024) * 5.15 * 3;
-
-    //Serial.print("(voltage ");
-    //Serial.print(voltageValue);
-    //Serial.println(" V)");
-
-    globalString.begin();
-    globalString += "(voltage ";
-    globalString += voltageValue;
-    globalString += " V)";
-
-    sendMessage(globalString);
-}
-
-/* --------------------------------------------------------------------------
- ** The Clock
- */
-
-byte second = 0;
-byte minute = 0;
-byte hour = 0;
-
-void clockHandler(void) {
-    if ((++second) == 60) {
-        second = 0;
-        if ((++minute) == 60) {
-            minute = 0;
-
-            if ((++hour) == 100) hour = 0; // Max: 99 hours, 59 minutes, 59 seconds
-        }
-    }
-}
-
-void resetClockCommand(void) {
-
-    second = minute = hour = 0;
-}
-
-/* --------------------------------------------------------------------------
- ** Light Sensor Handler
- */
-
-int lightValue = 0;
-
-void lightSensorHandler(void) {
-
-    lightValue = analogRead(PIN_LIGHT_SENSOR);
-
-    globalString.begin();
-    globalString = "(light_lux ";
-    globalString += lightValue;
-    globalString += " lux)";
-    sendMessage(globalString);
-}
-
-
-/* --------------------------------------------------------------------------
- ** Temperature Sensor
- */
-
-OneWire oneWire(PIN_ONE_WIRE); // Maxim DS18B20 temperature sensor
-
-byte oneWireInitialized = false;
-
-#define ONE_WIRE_COMMAND_READ_SCRATCHPAD  0xBE
-#define ONE_WIRE_COMMAND_START_CONVERSION 0x44
-#define ONE_WIRE_COMMAND_MATCH_ROM        0x55
-#define ONE_WIRE_COMMAND_SKIP_ROM         0xCC
-
-#define ONE_WIRE_DEVICE_18B20  0x28
-#define ONE_WIRE_DEVICE_18S20  0x10
-
-int temperature_whole = 0;
-int temperature_fraction = 0;
-
-/*
-void processOneWireListDevices(void) {
- byte address[8];
-
- oneWire.reset_search();
-
- while (oneWire.search(address)) {
- if (OneWire::crc8(address, 7) == address[7]) {
- if (address[0] == ONE_WIRE_DEVICE_18B20) {
- // Display device details
- }
- }
- }
- }
- */
-void temperatureSensorHandler(void) { // total time: 33 milliseconds
-    byte address[8];
-    byte data[12];
-    byte index;
-
-    if (!oneWire.search(address)) { // time: 14 milliseconds
-        //  Serial.println("(error 'No more one-wire devices')");
-        oneWire.reset_search(); // time: <1 millisecond
-        return;
-    }
-    /*
-    Serial.print("OneWire device: ");
-     for (index = 0; index < 8; index ++) {
-     Serial.print(address[index], HEX);
-     Serial.print(" ");
-     }
-     Serial.println();
-     */
-    if (OneWire::crc8(address, 7) != address[7]) {
-        //  sendMessage("(error 'Address CRC is not valid')");
-        return;
-    }
-
-    if (address[0] != ONE_WIRE_DEVICE_18B20) {
-        //  sendMessage("(error 'Device is not a DS18B20')");
-        return;
-    }
-
-    if (oneWireInitialized) {
-        byte present = oneWire.reset(); // time: 1 millisecond
-        oneWire.select(address); // time: 5 milliseconds
-        oneWire.write(ONE_WIRE_COMMAND_READ_SCRATCHPAD); // time: 1 millisecond
-
-        for (index = 0; index < 9; index++) { // time: 5 milliseconds
-            data[index] = oneWire.read();
-        }
-        /*
-        Serial.print("Scratchpad: ");
-         Serial.print(present, HEX);
-         Serial.print(" ");
-         for (index = 0; index < 9; index++) {
-         Serial.print(data[index], HEX);
-         Serial.print(" ");
-         }
-         Serial.println();
-         */
-        if (OneWire::crc8(data, 8) != data[8]) {
-            //    sendMessage("(error 'Data CRC is not valid')");
-            return;
-        }
-
-        int temperature = (data[1] << 8) + data[0];
-        int signBit = temperature & 0x8000;
-        if (signBit) temperature = (temperature ^ 0xffff) + 1; // 2's complement
-
-        int tc_100 = (6 * temperature) + temperature / 4; // multiply by 100 * 0.0625
-
-        temperature_whole = tc_100 / 100;
-        temperature_fraction = tc_100 % 100;
-
-        globalString.begin();
-        globalString = "(temperature ";
-        if (signBit) globalString += "-";
-        globalString += temperature_whole;
-        globalString += ".";
-
-        if (temperature_fraction < 10) globalString += "0";
-        globalString += temperature_fraction;
-        globalString += " C)";
-        sendMessage(globalString);
-    }
-
-    // Start temperature conversion with parasitic power
-    oneWire.reset(); // time: 1 millisecond
-    oneWire.select(address); // time: 5 milliseconds
-    oneWire.write(ONE_WIRE_COMMAND_START_CONVERSION, 1); // time: 1 millisecond
-
-    // Must wait at least 750 milliseconds for temperature conversion to complete
-    oneWireInitialized = true;
-}
-
 #ifdef COMMANDABLE
+
+
 /* -------------------------------------------------------------------------- */
 /*
  * Arduino serial buffer is 128 characters.
@@ -1165,7 +990,6 @@ void serialHandlerInitialize(void) {
     Serial.begin(DEFAULT_BAUD_RATE);
     serialHandlerInitialized = true;
 }
-
 
 void serialHandler(void) {
     static char buffer[32];
@@ -1244,7 +1068,6 @@ void parseCommand(char* buffer) {
     }
 }
 
-
 String chop_string(char* input, int chop_at) {
     //Serial.println(input);
     //Serial.println(chop_at);
@@ -1298,8 +1121,6 @@ void relayCommand(void) {
     //Serial.println(energise_time);
     //Serial.println(seg_command_id);
     //Serial.println(command_response);
-
-    command_response = "pending";
 
     if (strncmp(energise, "on", 2) == 0) {
         digitalWrite(PIN_RELAY, HIGH);
@@ -1447,6 +1268,195 @@ void relayMessager(char* message) {
 
 #endif
 
+/* --------------------------------------------------------------------------
+ ** Voltage Sensor
+ */
+
+float voltageRaw = 0;
+float voltageValue = 0;
+
+void voltageSensorHandler(void) {
+
+    voltageValue = 0;
+
+    voltageRaw = analogRead(PIN_VOLTAGE_SENSOR);
+
+    // Divide out the ratio from the ADC and multiply by Aref
+    // Then multiply by 3 (note R1 = 200 and R2 = 100)
+    voltageValue = (voltageRaw / 1024) * 5.15 * 3;
+
+    //Serial.print("(voltage ");
+    //Serial.print(voltageValue);
+    //Serial.println(" V)");
+
+    globalString.begin();
+    globalString += "(voltage ";
+    globalString += voltageValue;
+    globalString += " V)";
+
+    sendMessage(globalString);
+}
+
+/* --------------------------------------------------------------------------
+ ** The Clock
+ */
+
+byte second = 0;
+byte minute = 0;
+byte hour = 0;
+
+void clockHandler(void) {
+    if ((++second) == 60) {
+        second = 0;
+        if ((++minute) == 60) {
+            minute = 0;
+
+            if ((++hour) == 100) hour = 0; // Max: 99 hours, 59 minutes, 59 seconds
+        }
+    }
+}
+
+void resetClockCommand(void) {
+
+    second = minute = hour = 0;
+}
+
+#ifdef IS_3_CHANNEL
+
+/* --------------------------------------------------------------------------
+ ** Light Sensor Handler
+ */
+
+int lightValue = 0;
+
+void lightSensorHandler(void) {
+
+    lightValue = analogRead(PIN_LIGHT_SENSOR);
+
+    globalString.begin();
+    globalString = "(light_lux ";
+    globalString += lightValue;
+    globalString += " lux)";
+    sendMessage(globalString);
+}
+
+#endif
+
+/* --------------------------------------------------------------------------
+ ** Temperature Sensor
+ */
+
+OneWire oneWire(PIN_ONE_WIRE); // Maxim DS18B20 temperature sensor
+
+byte oneWireInitialized = false;
+
+#define ONE_WIRE_COMMAND_READ_SCRATCHPAD  0xBE
+#define ONE_WIRE_COMMAND_START_CONVERSION 0x44
+#define ONE_WIRE_COMMAND_MATCH_ROM        0x55
+#define ONE_WIRE_COMMAND_SKIP_ROM         0xCC
+
+#define ONE_WIRE_DEVICE_18B20  0x28
+#define ONE_WIRE_DEVICE_18S20  0x10
+
+int temperature_whole = 0;
+int temperature_fraction = 0;
+
+/*
+void processOneWireListDevices(void) {
+ byte address[8];
+
+ oneWire.reset_search();
+
+ while (oneWire.search(address)) {
+ if (OneWire::crc8(address, 7) == address[7]) {
+ if (address[0] == ONE_WIRE_DEVICE_18B20) {
+ // Display device details
+ }
+ }
+ }
+ }
+ */
+void temperatureSensorHandler(void) { // total time: 33 milliseconds
+    byte address[8];
+    byte data[12];
+    byte index;
+
+    if (!oneWire.search(address)) { // time: 14 milliseconds
+        //  Serial.println("(error 'No more one-wire devices')");
+        oneWire.reset_search(); // time: <1 millisecond
+        return;
+    }
+    /*
+    Serial.print("OneWire device: ");
+     for (index = 0; index < 8; index ++) {
+     Serial.print(address[index], HEX);
+     Serial.print(" ");
+     }
+     Serial.println();
+     */
+    if (OneWire::crc8(address, 7) != address[7]) {
+        //  sendMessage("(error 'Address CRC is not valid')");
+        return;
+    }
+
+    if (address[0] != ONE_WIRE_DEVICE_18B20) {
+        //  sendMessage("(error 'Device is not a DS18B20')");
+        return;
+    }
+
+    if (oneWireInitialized) {
+        byte present = oneWire.reset(); // time: 1 millisecond
+        oneWire.select(address); // time: 5 milliseconds
+        oneWire.write(ONE_WIRE_COMMAND_READ_SCRATCHPAD); // time: 1 millisecond
+
+        for (index = 0; index < 9; index++) { // time: 5 milliseconds
+            data[index] = oneWire.read();
+        }
+        /*
+        Serial.print("Scratchpad: ");
+         Serial.print(present, HEX);
+         Serial.print(" ");
+         for (index = 0; index < 9; index++) {
+         Serial.print(data[index], HEX);
+         Serial.print(" ");
+         }
+         Serial.println();
+         */
+        if (OneWire::crc8(data, 8) != data[8]) {
+            //    sendMessage("(error 'Data CRC is not valid')");
+            return;
+        }
+
+        int temperature = (data[1] << 8) + data[0];
+        int signBit = temperature & 0x8000;
+        if (signBit) temperature = (temperature ^ 0xffff) + 1; // 2's complement
+
+        int tc_100 = (6 * temperature) + temperature / 4; // multiply by 100 * 0.0625
+
+        temperature_whole = tc_100 / 100;
+        temperature_fraction = tc_100 % 100;
+
+        globalString.begin();
+        globalString = "(temperature ";
+        if (signBit) globalString += "-";
+        globalString += temperature_whole;
+        globalString += ".";
+
+        if (temperature_fraction < 10) globalString += "0";
+        globalString += temperature_fraction;
+        globalString += " C)";
+        sendMessage(globalString);
+    }
+
+    // Start temperature conversion with parasitic power
+    oneWire.reset(); // time: 1 millisecond
+    oneWire.select(address); // time: 5 milliseconds
+    oneWire.write(ONE_WIRE_COMMAND_START_CONVERSION, 1); // time: 1 millisecond
+
+    // Must wait at least 750 milliseconds for temperature conversion to complete
+    oneWireInitialized = true;
+}
+
 
 /* --------------------------------------------------------------------------
  ** Baud Rate Handler
@@ -1497,15 +1507,15 @@ void serialMirrorHandler(void) {
 
     unsigned long timeNow = millis();
     int count = serialMirror.available();
-
+    
     //Serial.println("In Serial mirror");
-
+    
     if (count == 0) {
         if (serialMirrorLength > 0) {
             if (timeNow > serialMirrorTimeOut) {
                 Serial.println("(error serialMirrorTimeout)");
                 serialMirrorLength = 0;
-            }
+            } 
         } else {
           //Serial.println("Nothing on the serial mirror...");
         }
@@ -1518,15 +1528,15 @@ void serialMirrorHandler(void) {
         globalString += ")";
         sendMessage(globalString);
         */
-
+        
         //Serial.println(serialMirrorBuffer);
 
         for (int index = 0; index < count; index++) {
-
+          
             char ch = serialMirror.read();
-
+            
             //Serial.print(ch);
-
+         
             if (serialMirrorLength >= (sizeof (serialMirrorBuffer) / sizeof (*serialMirrorBuffer))) {
                 Serial.println("(error serialMirrorBufferOverflow)");
                 serialMirrorBuffer[serialMirrorLength] = '\0';
@@ -1546,6 +1556,7 @@ void serialMirrorHandler(void) {
     }
 }
 #endif
+
 
 
 

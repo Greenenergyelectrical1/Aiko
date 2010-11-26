@@ -5,7 +5,7 @@
 -- Copyright (c) 2009-2010 by Geekscape Pty. Ltd.
 -- Documentation:  http://groups.google.com/group/aiko-platform
 -- License: GPLv3. http://geekscape.org/static/arduino_license.html
--- Version: 0.3
+-- Version: 0.4 adjusted by @samotage
 
 --------------------------------------------------------------------------
 -- Aiko-Gateway: Name of this system (also used by Smart Energy Groups) --
