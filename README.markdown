@@ -35,31 +35,41 @@ and easier to then combine and integrate them with less code changes.
 Installation
 ============
 
+Get the samotage fork of the Aiko codeline:
+https://github.com/samotage/Aiko
+
+You will need some libraries for Arduino to compile correctly,
+
 Change into your Arduino libraries folder and use git to clone the project.
 
 On a Mac this looks like:
 
-    cd /Applications/arduino-0015/hardware/libraries
-    git clone git://github.com/geekscape/Aiko.git
+    cd /Applications/Arduino.app/Contents/Resources/Java/libraries
 
+    into this directory copy the whole Aiko directory as a library.
+    this will include necessary resources for the SEGmeter.
+   
 On Linux, this will directory will be wherever you install your Arduino
 software.
 
-Alternatively you can download a tarball or ZIP archive from the Aiko
-repository by clicking the "download" link at:
+Other dependencies
+==================
 
-    http://github.com/geekscape/Aiko/tree/master
+There are some other things that the SEGmeter code needs to work fully, these are 
+separate Arduino libraries that need to be instlled into the library directory above.
 
-Upgrading
----------
+They are:
 
-To upgrade to the latest version:
+String
+NewSoftSerial
+PString
+OneWire
 
-    cd /Applications/arduino-0015/hardware/libraries/Aiko
-    git pull
-    make clean
+Whilst it's possible to search for these resources in the intertubes, 
+they have been packaged up here for your benifit.
 
-(If you're on a Mac, you'll need XCode installed.)
+Aiko
+
 
 
 Modules
