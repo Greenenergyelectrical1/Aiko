@@ -68,7 +68,10 @@ OneWire
 Whilst it's possible to search for these resources in the intertubes, 
 they have been packaged up here for your benifit.
 
-Aiko
+So, go to here:
+https://github.com/samotage/Aiko/tree/master/other_arduino_libraries/
+
+And add each of the above directories into the above mentioned Arduino Library directory.
 
 
 
