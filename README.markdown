@@ -60,7 +60,6 @@ separate Arduino libraries that need to be instlled into the library directory a
 
 They are:
 
-String
 NewSoftSerial
 PString
 OneWire
