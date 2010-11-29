@@ -6,13 +6,63 @@
 -- Copyright (c) 2009 by Geekscape Pty. Ltd.
 -- Documentation:  http://groups.google.com/group/aiko-platform
 -- License: GPLv3. http://geekscape.org/static/arduino_license.html
--- Version: 0.4 updated by @samotage
+-- Version: 0.3
 -- ------------------------------------------------------------------------- --
 -- See Google Docs: "Project: Aiko: Stream protocol specification"
 -- Currently requires an Aiko Gateway (indirect mode only).
 -- ------------------------------------------------------------------------- --
 --
 -- Custom configuration: See "aiko_configuration.lua".
+--
+-- Some Information
+-- ~~~~~~~~~~~~~~~~
+--
+-- Sending data to SEG:
+-- some information as to how the gateway will send data up to SEG with this s-expression:
+-- (site site_token (node node_name time_stamp (stream_name value)))
+-- to the restful web service at:
+-- http://api.smartenergygroups.com/api_sites/stream
+-- :method => :put
+--
+-- where refrence keys, tokens can be obtained from Smart Energy Groups (SEG) here
+
+-- https://smartenergygroups.com/my_things/show_keys
+-- site_token = SEG site token
+-- node_name = SEG device node name
+-- time_stamp = a time stamp values:
+--    ? to tell SEG to use the SEG server time in UTC
+--    The time stamp in ISO 8601 format stamped by the SEGbox (not yet implemented)
+-- stream_name = SEG stream name (belonging to a device)
+--
+-- Executing commands from SEG:
+-- smartenergygroups.com can send commands to commandable SEGmeters or nodes
+-- the command comes on the response of the sending data :put command in the form
+-- (node_name (relay relay_state shot_seconds command_id));
+--
+-- where:
+-- node_name = the name of your SEG device (refer above)
+-- relay = a fixed string from SEG telling the device this is a relay command
+-- relay_state = on or off - self explainatory ;)
+-- shot_seconds = the following values:
+--     ? or 0 remain on indefinately or
+--     some value in seconds to remain in the state of on
+-- command_id = the SEG command id, for reciepting the completion of the command
+--
+-- The SEGmeter device will take this command and execute it, and return a message
+-- for sending back to SEG for completion of the command like so:
+--
+-- (node node_name time_stamp (command command_id command_status))
+--
+-- where:
+-- command = a keyword to identify the information being sent to SEG is a command reciept
+-- command_status = the status of the command, usually complete, but may be error.
+--
+-- Some notes about SEG and commands:
+-- SEG will retry command sending a number of times if it doesn't get a completed message before giving up.
+-- SEG will idempotent commands, e.g. if a switch is on/off/on/off/on/off/on/off a number of times in the polling
+-- period, the last command will be sent.
+-- SEG will process commands already in a state of executing before sending new commands to the device.
+--
 --
 -- ToDo: Aiko Gateway
 -- ~~~~~~~~~~~~~~~~~~
@@ -21,20 +71,9 @@
 --   - Send tweet to owner, if newer software versions are available.
 
 -- - Re-open serial network port 2000, if it closes.
--- - Listen on socket for commands to Aiko-Gateway.
--- - Migrate Twitter LED sign support to Aiko-Node.
--- - Support Aiko-Gateway router and Arduino as a "single" node.
---   - "eek_1" consists of "eek_1.gateway" and "eek_1.node".
--- - Deliver commands from web server to specific Aiko-Nodes.
--- - Aiko-Gateway I/O commands for display, alert, view, menu, etc.
 
 -- - Does "http" variable need to be local, or can it be global ?
--- - Start using XPlanner !
--- * Unit test S-Expressions using "curl" !
--- * Transmit dummy test S-Expressions to http://watchmything.com.
---   * Heart-beat: (site SiteId (node NodeName TimeStamp))
---   * Stream: (site SiteId (node NodeName TimeStamp (StreamName Value Unit)))
--- * Wrap messages with "(site SITE_TOKEN ...)".
+
 -- - Create aiko_gateway.sh, setting environment variables and background run.
 -- - Put all configuration parameters into a table.
 -- - Command line options: Host/Port, Help and Version.
@@ -44,33 +83,14 @@
 --   - Use LPeg (Parsing Expression Grammars For Lua) ?
 --     See http://www.inf.puc-rio.br/~roberto/lpeg
 -- - Maintain last message timestamp for idempotent message check.
--- - Transmit dummy test S-Expressions to http://geekscape.org (Play!, JAX-RS).
 -- - LuCI web server integration, e.g. monitor, control, configure, statistics.
--- - SSL connection to https://watchmything.com.
--- - Create Google Doc: Project: Aiko Gateway (AG): Sub-system design.
--- - Error responses from WatchMyThing.com should be machine parsable.
--- - Convert S-Expressions into JSON and vice-versa.
--- - Implement JSON-RPC client (for WatchMyThing.com) and server (for AikoJ).
--- - Investigate using XMPP.
+-- - SSL connection to https://api.smartenergygroups.com.
 -- - Handle some messages from Aiko, e.g. errors, provide date/time.
 -- - Handle "debug messages" from Aiko-Node, e.g. "; Lisp comment :)"
 
--- (status okay)
--- (status error "message")
--- (node pebble_1 2009-09-23T16:00:00 (relay true nil))
--- (node pebble_2 2009-09-23T16:00:00 (relay false nil))
--- (node pebble_2 2009-09-23T16:00:00 (display "Message string"))
-
 -- ToDo: Aiko Node
 -- ~~~~~~~~~~~~~~~
--- - Start using XPlanner !
--- * New S-Expression message format.
---   - Idempotent: Using TimeStamp or ?unique_number (boot count in EEPROM ?).
--- - Send "debug messages" as "; Lisp comments :)"
--- - Ignore OpenWRT boot messages and wait for Ser2Net start message.
--- - Implement "(http on)" and "(http off)" to enable HTTP headers.
--- - Implement "(error on)" and "(error off)" to enable error messages.
--- - Configuration in EEPROM, e.g nodeName, devices, networking, site token.
+-- - Configuration in EEPROM, e.g nodeName, devices, networking, site token and other useful parameters
 -- - Profile negotiation, i.e like Telnet negotiation.
 -- - Message optimatization, including "transducer identifier" (integer).
 -- - Messages ...
@@ -85,7 +105,6 @@
 --   - (profile= PROFILE-NAME)
 --   - (schedule= SCHEDULE) --> EEPROM.
 --   - (serial_number= SERIAL_NUMBER) --> EEPROM.
--- - Create Google Doc: Project: Aiko: Sub-system design.
 
 -- ToDo: Miscellaneous
 -- ~~~~~~~~~~~~~~~~~~~
@@ -191,10 +210,9 @@ end
 -- ------------------------------------------------------------------------- --
 
 function use_development_server()
---local web_host_name = "192.168.0.109:8080"  -- "stormac:8080"
-  local web_host_name = "tuxu"
+  local web_host_name = "192.168.110.189:3000"
 
-  url = "http://" .. web_host_name .. "/meemplex/rest/device/"
+  url = "http://" .. web_host_name .. "/api_sites/stream"
 
   file_name = current_directory() .. "/data/aiko_test2.data"
 
@@ -273,11 +291,13 @@ function send_message(message)
   else
 
     response = table.concat(response)
+    -- print("-- The fresh SEG response: ", response)
 
     if (response:sub(1, 6) == "(node ") then
       if (debug) then
         print("-- SEG node command received: ", response)
       end
+      -- print("-- The command received from SEG: ", response)
 
       -- example command (node (segmeter (relay on 0 7734)))
 
@@ -350,7 +370,7 @@ end
 function send_event_boot(node_name)
   if (debug) then print("-- send_event_boot(): " .. node_name) end
 
-  message = "(status boot 0.4)"
+  message = "(status boot 0.3)"
   send_message(wrap_message(message, node_name))
 end
 
@@ -439,12 +459,18 @@ end
 -- ------------------------------------------------------------------------- --
 
 function serial_handler()
+
   serial_client = socket.connect(aiko_gateway_address, 2000)
   serial_client:settimeout(serial_timeout_period)  -- 0 --> non-blocking read
 
---serial_client:send("")
+  --serial_client:send("")
 
   local stream, status, partial
+
+  local this_message = nil
+  local message = nil
+  local joined_message = nil
+  local attempt = 0
 
   while (status ~= "closed") do
     stream, status, partial = serial_client:receive(16768)  -- (1024)
@@ -462,8 +488,46 @@ function serial_handler()
     -- print ("Aiko partial: ", partial) -- TODO: if not "nil" then got everything
 
     if (partial ~= nil and partial:len() > 0) then
-      -- print("The AIKO Partial before parse_message is: ", partial)
-      parse_message(partial)
+      if (debug) then
+        print("The AIKO Partial before parse_message is: ", partial)
+      end
+
+      for message in partial:gmatch("[^\r\n]+") do
+
+        this_message = nil
+
+        if ( check_message_bracketing(message) ~= true) then
+          -- If the above is fail, it's likely a subsequent message may have the goods.
+
+          joined_message = join_partial_messages(message, joined_message, attempt)
+
+          attempt = attempt + 1
+
+          if (joined_message ~= nil) then
+            if (check_message_bracketing(joined_message) == true) then
+              if (special_debug) then
+                print("#WIN on fixing broken message: ", joined_message)
+              end
+              partial = joined_message
+              joined_message = nil
+              attempt = 0
+            else
+              if (debug) then
+                print("Still some joining work to make win: ", joined_message)
+              end
+            end
+          else
+            -- Joining terminated.
+            attempt = 0
+          end
+        else
+          this_message = message
+        end
+
+        if (this_message ~= nil) then
+          parse_message(this_message)
+        end
+      end -- the gmatch check
     end
 
     if (status == "timeout") then
@@ -472,6 +536,45 @@ function serial_handler()
   end
 
   serial_client:close()
+end
+
+function check_message_bracketing(message)
+  local goodness = true
+  if (message:sub(1, 1) ~= "("  or  message:sub(-1) ~= ")") then
+    if (special_debug) then
+      print("SEGmeter message not correctly bracketed: ", message)
+    end
+    goodness = false
+  end
+  return goodness
+end
+
+function join_partial_messages(message, joined_message, attempt)
+
+  if (special_debug) then
+    print("Message joining attempt: ", attempt)
+  end
+
+  if (attempt == 0) then
+    joined_message = message
+    if (debug) then
+      print("Initiating message correction: joined_message = ", joined_message)
+    end
+  else
+    joined_message = joined_message .. message
+    if (debug) then
+      print("Joining message up: joined_message = ", joined_message)
+    end
+  end
+
+  if (attempt > 3) then
+    if (debug) then
+      print("Giving up fixing message on attempt: ", attempt)
+    end
+    joined_message = nil
+  end
+
+  return joined_message
 end
 
 -- ------------------------------------------------------------------------- --
@@ -486,57 +589,20 @@ end
 function parse_message(buffer)
   if (debug) then print("-- parse_message(): start") end
 
-  local part_message_string = nil
   local last_message = nil
-  local this_message = nil
-  local attempts = 0
 
   -- Parse individual Aiko-Node messages, delimited by "carriage return"
 
   for message in buffer:gmatch("[^\r\n]+") do
-    -- Check that the message isn't a duplicate
 
-    
-    -- Check message properly framed, e.g. (message)
-    if (message:sub(1, 1) ~= "("  or  message:sub(-1) ~= ")") then
-      print("-- parse_message(): ERROR: Message not delimited by ():", message)
-      -- It seems that there is been some framing error perhaps the next one will have the rest
-
-      if (part_message_string == nil) then
-        part_message_string = message
-        attempts = attempts + 1
-      else
-        part_message_string = part_message_string .. message
-        attempts = attempts + 1
-
-        -- lets now check again on the dodgy part message
-        if (part_message_string:sub(1, 1) ~= "("  or  part_message_string:sub(-1) ~= ")") then
-          -- print("Still dodgy part message: ", part_message_string)
-          -- print("Repair attempts: ", attempts)
-        else
-          this_message = part_message_string
-          part_message_string = nil
-          attempts = 0
-        end
-        print("Joined up partial message: ", part_message_string)
-      end
-
-      if (attempts > 3) then
-        -- forget about it.
-        part_message_string = nil
-        attempts = 0
-      end
-
-      
-    else
-      this_message = message
-    end
-
-    if (this_message ~= nil) then
+    if ( check_message_bracketing(message) == true) then
       -- Check message wrapped by node name, e..g (node name ...)
+
       if (message:sub(1, 6) ~= "(node ") then
-        print("-- parse_message(): ERROR: Message doesn't start with 'node'")
-        if (debug) then print("-- message: ", message) end
+        if (debug) then
+          print("SEGmeter message pecularity - doesn't start with 'node'", message)
+          print("If the above looks like a SEG command this is ok")
+        end
       else
 
         -- Parse node name
@@ -574,11 +640,7 @@ function parse_message(buffer)
           end
         end
      end
-     this_message = nil
    end
-
-
-    
 
   end -- end the message loop
 
@@ -587,198 +649,10 @@ end
 
 -- ------------------------------------------------------------------------- --
 
--- TODO: Move into a library file.
-
--- Control Amplus LED signs
--- See http://freezerpants.com/toledo
-
--- if (arg[1]) then text = arg[1] end
-
-floor = math.floor
-
-function bxor(a,b)
-  local r = 0
-  for i = 0, 31 do
-    local x = a / 2 + b / 2
-    if x ~= floor (x) then
-      r = r + 2^i
-    end
-    a = floor (a / 2)
-    b = floor (b / 2)
-  end
-
-  return(r)
-end
-
-function led_sign_display(text)
-  local output = true
-
-  local id     = "00" -- Sign id: Default 00
-  local line   = "1"  -- Line to program: Default 1
-  local page   = "A"  -- Page to program: A - Z
-  local intro  = "<FE>"
-
---  1: FA: immediate
---  2: FB: xopen
---  3: FC: curtain up
---  4: FD: curtain down
---  5: FE: scroll left
---  6: FF: scroll right
---  7: FG: vopen
---  8: FH: vclose
---  9: FI: scroll up
--- 10: FJ: scroll down
--- 11: FK: hold
--- 12: FL: snow
--- 13: FM: twinkle
--- 14: FN: block move
--- 15: FP: random
--- 16: FR: cursive welcome
-  local speed    = "<MA>" -- 1:Mq, 2:Ma, 3:MQ, 4:MA (slowest to fastest)
-  local exit     = "<FE>"
--- As per "intro", but only 1:FA through to 11:FK
-  local bell     = "" -- 0: no bell, 1:BA 0.5s, 2:BB 1.0s, 3:BC 1.5s, 4:BD 2.0s
-  local colour   = "" -- 0: no colour
--- red:     CA
--- orange:  CH
--- green:   CD
--- iorange: CN
--- igreen:  CM
--- ired:    CL
--- rog:     CP
--- gor:     CQ
--- ryg:     CR
--- rainbow: CS
-  local dFlag    = "" -- 0: no date, 1: KD (date)
-  local tFlag    = "" -- 0: no time, 1: KT (time)
-  local fontFlag = "<AC>"  -- 1=AC, 2=AA, 3=AB, 4=AF, 5=AD
-
-  local message = string.format("<L%s><P%s>%s%s<WC>%s%s%s%s%s%s%s",
-    line, page, intro, speed, exit, bell, colour, dFlag, tFlag, fontFlag, text)
-
-  local checksum = 0
-  for index = 1, message:len() do
-    checksum = bxor(checksum, message:byte(index))
-  end
-
-  message = string.format("<ID%s>%s%02X<E>", id, message, checksum)
-
-  if (output) then
-    if (debug) then print(message) end
---  local serial_client = socket.connect("localhost", 2000)
-    serial_client:send(message .. "\n")
---  serial_client:close()
-  end
-end
-
--- link()
--- message = string.format("<TA>00010100009912302359%s", "ABCD")
--- message = strong.format("<ID%s>%s%s<E>", id, message, checksum)
-
--- ------------------------------------------------------------------------- --
-
--- TODO: Move into a library file.
-
--- http://apiwiki.twitter.com/Twitter-Search-API-Method%3A-search
---
--- http://it-box.blogturk.net/2009/01/08/how-to-hack-twitter-with-a-few-lines-of-lua-code
-
-function twitter_query()
-  require("json")
-
-  local http = require("socket.http")
-  local request = "http://search.twitter.com/search.json?q=%s&since_id=%s&rpp=10"
-  local throttle_counter = 1     -- Always start with a Twitter query
-
-  while (true) do
-    print("-- twitter_query(): TIMER")
-    throttle_counter = throttle_counter - 1
-
-    if (throttle_counter <= 0) then
-      throttle_counter = twitter_throttle
-
-      local relay_state = false  -- TODO: Cache this, reduce messages
-      command = "(relay off)"    -- TODO: Don't need to send this every time !
-      if (debug) then print("-- send message(): command: ", command) end
---    serial_client:send(command .. ";\n")
-
-      print("-- twitter_query(): QUERY: ", twitter_search)
-      local response = http.request(string.format(request, url_encode(twitter_search), twitter_since_id))
-
-      print("-- twitter_query(): RESPONSE")
-
--- TODO: Remove "\r\n" from "response"
-
-      local latest_from_user  = nil
-      local latest_created_at = nil
-      local latest_text       = nil
-
-      for index, value in pairs(json.decode(response)) do
---      print("index: ", index)
---      print("value: ", value)
-
-        if (index == "max_id") then
-          twitter_since_id = value
-          print("-- twitter_query(): new_since_id: ", twitter_since_id)
-        end
-
-        if (type(value) == 'table') then
-          for index2 = 1, #value do
-            relay_state = true
-
-            print("- - - - - - - - - - - - - - - - - - - -")
-            local new_since_id = value[index2].id 
-
-            if (new_since_id > twitter_since_id) then
-              twitter_since_id = new_since_id
-              print("-- twitter_query(): new_since_id: ", twitter_since_id)
-            end
-
-            local from_user  = value[index2].from_user 
-            local created_at = value[index2].created_at
-            local text       = value[index2].text
-
-            if (latest_from_user == nil) then
-              latest_from_user = from_user
-              latest_created_at = created_at
-              latest_text      = text
-            end
-
-            print("Twitter: From user: ", from_user)
-            print("Twitter: Date/Time: ", created_at)
-            print("Twitter: Message:   ", text)
-
---          for index3, value3 in pairs(value[index2]) do
---            print("  index3: ", index3)
---            print("  value3: ", value3)
---          end
-          end
-        end
-      end
-
-      if (relay_state) then
-        command = "(relay on)"
-        if (debug) then print("-- send message(): command: ", command) end
---      serial_client:send(command .. ";\n")
-      end
-
-      if (led_sign_flag) then
-        if (latest_from_user ~= nil) then
-          led_sign_display(" ")
-          led_sign_display("[" .. latest_from_user .. "] " .. latest_text)
---        led_sign_display(latest_from_user .. ": " .. latest_text:sub(1, 16))
-        end
-      end
-    end
-
-    coroutine.yield()
-  end
-end
-
--- ------------------------------------------------------------------------- --
-
 function initialize()
   PLAIN = 1  -- string.find() pattern matching off
+
+  special_debug = true
 
   use_production_server()   -- Smart Energy Groups web service
 --use_development_server()  -- Some development server
@@ -787,7 +661,7 @@ end
 
 -- ------------------------------------------------------------------------- --
 
-print("[Aiko-Gateway V0.4 2010-11-23]")
+print("[Aiko-Gateway V0.4 2010-11-28]")
 
 if (not is_production()) then require("luarocks.require") end
 require("socket")

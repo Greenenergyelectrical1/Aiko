@@ -1,4 +1,4 @@
-/* aiko_segmeter.pde
+/* 
  * ~~~~~~~~~~~~~
  * Please do not remove the following notices.
  * Copyright (c) 2009 by Geekscape Pty. Ltd.
@@ -58,51 +58,19 @@
  *
  * To Do
  * ~~~~~
- * - Put protocol version into boot message to Aiko-Gateway.
- * - Verify protocol version in the Aiko-Gateway boot message.
- * - Default baud rate 38,400 and auto-baud to 115,200.
  * - Fix temperature data acquisition should work every time, not every second time !
  * - Temperature sensor won't need 750 ms, if using permanent 5 VDC.
  * - Handle "(node= name)", where "name" greater than 40 characters.
- *   - "name" parameter should be delimited by double-quotes.
- * - Complete serialHandler() communications.
- * - Think about what happens when reusing "SExpressionArray commandArray" ?
- * - Implement: addCommandHandler() and removeCommandHandler().
- *   - This will be neater than the current ugly #ifdef / #endif arrangement.
- * - Implement: (update_rate SECONDS UNIT)
- * - Implement: (error on) (error off)
- * - Implement: (display_title= STRING) --> LCD position (0,0)
- * - Implement: (device_update NAME VALUE UNIT) or (NAME= VALUE)
- * - Implement: (profile)
- * - Implement: (clock yyyy-mm-ddThh:mm:ss)
- * - Improve error handling.
  */
 
 #include <PString.h>
-//#include <WString.h>
-
-#include <AikoEvents.h>
+//#include <AikoEvents.h>
 #include <AikoSExpression.h>
-
 #include <OneWire.h>
-
 using namespace Aiko;
-
-#define IS_SEGMETER
-// the folowing def is to use some other analog inputs.
-//#define IS_3_CHANNEL
-
-//To use or not use the Aiko events system
-//#define IS_AIKO
-#define NOT_AIKO
-
-#define HAS_SERIAL_MIRROR
+//#define HAS_SERIAL_MIRROR
 
 #define DEFAULT_NODE_NAME "segmeter"
-
-// This is only relevant if IS_AIKO
-#define DEFAULT_TRANSMIT_RATE    15  // seconds
-//#define STONE_DEBUG  // Enable capture and dump of all sampled values
 
 /*
  ** Phase Options
@@ -111,8 +79,6 @@ using namespace Aiko;
  ** MULTI_PHASE - Channels 1-3 are Feed 1 and Channels 4-6 are Feed 2
  ** GROUPED - For other magic, see below.
  */
- 
-#define COMMANDABLE
 
 #define SINGLE_PHASE
 //#define MULTI_PHASE
@@ -156,21 +122,20 @@ using namespace Aiko;
 //#define SUM_CHANNELS
 //#define SUBTRACT_CHANNELS
 
-// Setup the aref to use, one or the other.
+// Setup the aref to use, one or the other.  Most ADC is done in the 1.1 volt internal ARef range.
 //#define IS_5V_AREF
 #define IS_1V_AREF
 
-// For Australian conditions, 230V is the voltage to use becase of fluctionations.
+// For Australian conditions, 240V, 110 for US, and 230 for Europe
 #define MEASUREMENT_VOLTAGE 240.0
 
-// This is used for parallell supplies, where the sensor is clipped around one of the parallell cables.
+// Post calibrations, useful for energy cables in parallell.
 #define OUTPUT_MULTIPLIER 1.0
-
 
 #define CHANNELS          6   // Current Clamp(s)
 #define SAMPLES        1500  // Current samples to take
 #define AVERAGES          5   // Number of RMS values to average
-#define CYCLES            6   // Number of times to cycle through the calculations
+#define CYCLES           10   // Number of times to cycle through the calculations
 
 #define DEFAULT_BAUD_RATE     38400
 #define ONE_SHOT_TIME         180000
@@ -191,21 +156,6 @@ using namespace Aiko;
 #define SENSOR_JD_250 9
 #define SENSOR_JD_500 10
 
-// Calibration factors
-#define CALIBRATION_CSLT 25
-
-#define CALIBRATION_SCT_013_030 9.1
-#define CALIBRATION_SCT_013_060 25.8
-
-#define CALIBRATION_JAYCAR_CLIP_AREF_1 33.333
-#define CALIBRATION_JAYCAR_CLIP_AREF_1_LOW 280.0  // For low output range
-#define CALIBRATION_JAYCAR_CLIP_AREF_5 144.45
-
-#define CALIBRATION_CRMAG_200 1
-#define CALIBRATION_JD_100 1.1
-#define CALIBRATION_JD_250 1.1
-#define CALIBRATION_JD_500 1.1
-
 // Digital Input/Output pins
 #define PIN_SERIAL_RX       0
 #define PIN_SERIAL_TX       1
@@ -222,7 +172,7 @@ using namespace Aiko;
 #define PIN_LIGHT_SENSOR    3
 #define PIN_VOLTAGE_SENSOR  4
 
-#define SEG_STRING_SIZE 11
+#define SEG_STRING_SIZE 15
 #define BUFFER_SIZE 250
 
 // How often to stop for a serial mirror look in the main sample loop.
@@ -236,8 +186,7 @@ void (*commandHandlers[])() = {
     baudRateCommand,
     nodeCommand,
     relayCommand,
-    resetClockCommand,
-    transmitRateCommand
+    resetClockCommand
 };
 
 #define RELAY_COMMAND "relay"
@@ -283,43 +232,20 @@ void setup() {
     Serial.begin(DEFAULT_BAUD_RATE);
     // no ref means that it's at the 5Volts, perfect for the voltage handler.
 
-#ifdef IS_1V_AREF
-    //analogReference(EXTERNAL);
-    analogReference(INTERNAL);
-    myAref = 1.1;
-#endif
+    #ifdef IS_1V_AREF
+      //analogReference(EXTERNAL);
+      analogReference(INTERNAL);
+      myAref = 1.1;
+    #endif
 
-#ifdef IS_AIKO
-    // handlers set to 1 milisecond to use sleep mode
-    Events.addHandler(serialHandler, 10); // Sufficient for 38,400 baud
-    //   Events.addHandler(serialMirrorHandler, 30); // Sufficient for 38,400 baud
-    Events.addHandler(blinkHandler, 1000);
-    Events.addHandler(quickFlashHandler, 100);
-
-    Events.addHandler(nodeHandler, 15000);
-    //   Events.addHandler(temperatureSensorHandler, 60000);
-    // Events.addHandler(oneShotHandler, 1000);
-    // Events.addHandler(relayStateHandler, 60000);
-
-    Events.addHandler(segMeterHandler, 15000);
-    Events.addHandler(powerOutputHandler, 15000);
-#endif
 }
 
 void loop() {
-
-#ifdef IS_AIKO
-    Events.loop(); // do stuff
-#endif
-
-#ifdef NOT_AIKO
     segMeterHandler();
     //nodeHandler();
     powerOutputHandler();
     temperatureSensorHandler();
     temperatureSensorHandler();
-    
-#endif
 }
 
 /* --------------------------------------------------------------------------
@@ -328,30 +254,28 @@ void loop() {
  */
 void subEvents() {
   //Serial.println("Starting sub events...");
-  
-#ifdef COMMANDABLE
+
     serialHandler();
     oneShotHandler();
-#endif
   
-  /* 
-  * The Serial mirror handler is in a bunch of places, to service
-  * the 64 byte buffer more frequently.  They are:
-  * 1.  Here.
-  * 2.  Collect Channels.
-  * 3.  RMS Sampling loop.
-  * 4.  Transduced Sampling loop.
-  * 5.  Power output handler
-  */
-  
-  #ifdef HAS_SERIAL_MIRROR
-    // Listen and send on the serial mirror.
-    serialMirrorHandler();
-    mirror_samples = MIRROR_FREQUENCY;
-  #endif
-  
-        
-  //Serial.println("Finished with sub events...");
+    /* 
+    * The Serial mirror handler is in a bunch of places, to service
+    * the 64 byte buffer more frequently.  They are:
+    * 1.  Here.
+    * 2.  Collect Channels.
+    * 3.  RMS Sampling loop.
+    * 4.  Transduced Sampling loop.
+    * 5.  Power output handler
+    */
+    
+    #ifdef HAS_SERIAL_MIRROR
+      // Listen and send on the serial mirror.
+      serialMirrorHandler();
+      mirror_samples = MIRROR_FREQUENCY;
+    #endif
+    
+          
+    //Serial.println("Finished with sub events...");
 }
 
 /* --------------------------------------------------------------------------
@@ -440,7 +364,6 @@ void quickFlashHandler(void) {
  ** Current measurement oscillating around zero volts.
  */
 
-#ifdef IS_SEGMETER
 byte segMeterInitialised = false;
 
 float watts[CHANNELS]; // Instantaneous
@@ -474,6 +397,21 @@ float rms = 0;
 
 float energyNow = 0;
 
+// Calibration factors
+#define CALIBRATION_CSLT 25
+
+#define CALIBRATION_SCT_013_030 9.1
+#define CALIBRATION_SCT_013_060 25.8
+
+#define CALIBRATION_JAYCAR_CLIP_AREF_1 33.333
+#define CALIBRATION_JAYCAR_CLIP_AREF_1_LOW 280.0  // For low output range
+#define CALIBRATION_JAYCAR_CLIP_AREF_5 144.45
+
+#define CALIBRATION_CRMAG_200 1
+#define CALIBRATION_JD_100 1.1
+#define CALIBRATION_JD_250 1.1
+#define CALIBRATION_JD_500 1.1
+
 void segMeterInitialise(void) {
     // Init arrays
     for (int channel = 0; channel < CHANNELS; channel++) {
@@ -494,7 +432,7 @@ void segMeterInitialise(void) {
     channelSensors[2] = SENSOR_CSLT;
     channelSensors[3] = SENSOR_CSLT;
     channelSensors[4] = SENSOR_CSLT;
-    channelSensors[5] = SENSOR_SCT_013_060;
+    channelSensors[5] = SENSOR_CSLT;
    
     // Channel trim, add this value to the power reading
     channelTrim[0] = 0;
@@ -785,184 +723,183 @@ float correctNonLinearity(float this_rms) {
 
 void powerOutputHandler() {
   
-#ifdef HAS_SERIAL_MIRROR
-  // Listen and send on the serial mirror.
-  serialMirrorHandler();
-  mirror_samples = MIRROR_FREQUENCY;
-#endif
-
-#ifdef MULTI_PHASE
-    //
-
-    globalString.begin();
-
-    currentKW_1 = 0.0;
-    energySum_1 = 0.0;
-
-    currentKW_2 = 0.0;
-    energySum_2 = 0.0;
-
-    for (int channel = 0; channel < CHANNELS; channel++) {
-        if (channel == 0 || channel == 1 || channel == 2) {
-            currentKW_1 += watts[channel];
-            energySum_1 += energySum[channel];
-        } else if (CHANNELS > 3) {
-            currentKW_2 += watts[channel];
-            energySum_2 += energySum[channel];
+    #ifdef HAS_SERIAL_MIRROR
+      // Listen and send on the serial mirror.
+      serialMirrorHandler();
+      mirror_samples = MIRROR_FREQUENCY;
+    #endif
+    
+    #ifdef MULTI_PHASE
+        globalString.begin();
+    
+        currentKW_1 = 0.0;
+        energySum_1 = 0.0;
+    
+        currentKW_2 = 0.0;
+        energySum_2 = 0.0;
+    
+        for (int channel = 0; channel < CHANNELS; channel++) {
+            if (channel == 0 || channel == 1 || channel == 2) {
+                currentKW_1 += watts[channel];
+                energySum_1 += energySum[channel];
+            } else if (CHANNELS > 3) {
+                currentKW_2 += watts[channel];
+                energySum_2 += energySum[channel];
+            }
         }
-    }
-
-    globalString += "(p_1 ";
-    globalString += currentKW_1;
-    globalString += ")";
-
-    globalString += "(e_1 ";
-    globalString += energySum_1;
-    globalString += ")";
-
-    globalString += "(p_2 ";
-    globalString += currentKW_2;
-    globalString += ")";
-
-    globalString += "(e_2 ";
-    globalString += energySum_2;
-    globalString += ")";
-
-#endif
-
+    
+        globalString += "(p_1 ";
+        globalString += currentKW_1;
+        globalString += ")";
+    
+        globalString += "(e_1 ";
+        globalString += energySum_1;
+        globalString += ")";
+    
+        globalString += "(p_2 ";
+        globalString += currentKW_2;
+        globalString += ")";
+    
+        globalString += "(e_2 ";
+        globalString += energySum_2;
+        globalString += ")";
+    
+    #endif
 
 
-#ifdef GROUPED
-    //
 
-    globalString.begin();
-
-    float this_power = 0.0;
-    float this_energy = 0.0;
-    int channel_count = 1;
-
-    for (int channel = 0; channel < (GROUPS * GROUP_SIZE); channel++) {
-
-        // Lets group first
-
-        this_power += watts[channel];
-        this_energy += energySum[channel];
-
-        if (channel_count == GROUP_SIZE) {
-            // Lets output
+    #ifdef GROUPED
+        //
+    
+        globalString.begin();
+    
+        float this_power = 0.0;
+        float this_energy = 0.0;
+        int channel_count = 1;
+    
+        for (int channel = 0; channel < (GROUPS * GROUP_SIZE); channel++) {
+    
+            // Lets group first
+    
+            this_power += watts[channel];
+            this_energy += energySum[channel];
+    
+            if (channel_count == GROUP_SIZE) {
+                // Lets output
+                globalString += "(p_";
+                globalString += channel + 1;
+                globalString += " ";
+                globalString += this_power;
+                globalString += ")";
+    
+    
+                globalString += "(e_";
+                globalString += channel + 1;
+                globalString += " ";
+                globalString += this_energy;
+                globalString += ")";
+    
+                channel_count = 1;
+                this_power = 0.0;
+                this_energy = 0.0;
+            } else {
+                channel_count += 1;
+            }
+        }
+    
+        // Now thats done, output the remaining single channels
+    
+        for (int channel = (GROUPS * GROUP_SIZE); channel < CHANNELS; channel++) {
+    
             globalString += "(p_";
             globalString += channel + 1;
             globalString += " ";
-            globalString += this_power;
+            globalString += watts[channel];
             globalString += ")";
-
-
+    
             globalString += "(e_";
             globalString += channel + 1;
             globalString += " ";
-            globalString += this_energy;
+            globalString += energySum[channel];
             globalString += ")";
-
-            channel_count = 1;
-            this_power = 0.0;
-            this_energy = 0.0;
-        } else {
-            channel_count += 1;
         }
-    }
-
-    // Now thats done, output the remaining single channels
-
-    for (int channel = (GROUPS * GROUP_SIZE); channel < CHANNELS; channel++) {
-
-        globalString += "(p_";
-        globalString += channel + 1;
-        globalString += " ";
-        globalString += watts[channel];
+    
+    #endif
+    
+    
+    #ifdef SINGLE_PHASE
+        globalString.begin();
+    
+        for (int channel = 0; channel < CHANNELS; channel++) {
+    
+            globalString += "(p_";
+            globalString += channel + 1;
+            globalString += " ";
+            globalString += watts[channel];
+            globalString += ")";
+    
+            globalString += "(e_";
+            globalString += channel + 1;
+            globalString += " ";
+            globalString += energySum[channel];
+            globalString += ")";
+        }
+    
+    #endif
+    
+    #ifdef SUM_CHANNELS
+        currentKWOut = 0.0;
+        energySumOut = 0.0;
+    
+        // Sum the puppies
+        for (int channel = 0; channel < CHANNELS; channel++) {
+    
+            currentKWOut += watts[channel];
+            energySumOut += energySum[channel];
+        }
+    
+        globalString += "(p ";
+        globalString += currentKWOut;
         globalString += ")";
-
-        globalString += "(e_";
-        globalString += channel + 1;
-        globalString += " ";
-        globalString += energySum[channel];
+    
+        globalString += "(e ";
+        globalString += energySumOut;
         globalString += ")";
-    }
-
-#endif
-
-
-#ifdef SINGLE_PHASE
-    globalString.begin();
-
-    for (int channel = 0; channel < CHANNELS; channel++) {
-
-        globalString += "(p_";
-        globalString += channel + 1;
-        globalString += " ";
-        globalString += watts[channel];
+    #endif
+    
+    #ifdef SUBTRACT_CHANNELS
+        currentKWOut = 0.0;
+        energySumOut = 0.0;
+    
+        // Sum the puppies to make channel number 7,
+        // channel 7 = Channel 1 - ( Channels 2 thru 6)
+        // Because this is a computer, we use 0 instead of 1...
+    
+        for (int channel = 1; channel < CHANNELS; channel++) {
+    
+            currentKWOut += watts[channel];
+            energySumOut += energySum[channel];
+        }
+    
+        currentKWOut = watts[0] - currentKWOut;
+        energySumOut = energySum[0] - energySumOut;
+    
+        // Sanitisation
+    
+        if (currentKWOut < 0.0) {
+            currentKWOut = 0;
+            energySumOut = 0;
+        }
+    
+        globalString += "(p_7 ";
+        globalString += currentKWOut;
         globalString += ")";
-
-        globalString += "(e_";
-        globalString += channel + 1;
-        globalString += " ";
-        globalString += energySum[channel];
+    
+        globalString += "(e_7 ";
+        globalString += energySumOut;
         globalString += ")";
-    }
-
-#endif
-
-#ifdef SUM_CHANNELS
-    currentKWOut = 0.0;
-    energySumOut = 0.0;
-
-    // Sum the puppies
-    for (int channel = 0; channel < CHANNELS; channel++) {
-
-        currentKWOut += watts[channel];
-        energySumOut += energySum[channel];
-    }
-
-    globalString += "(p ";
-    globalString += currentKWOut;
-    globalString += ")";
-
-    globalString += "(e ";
-    globalString += energySumOut;
-    globalString += ")";
-#endif
-
-#ifdef SUBTRACT_CHANNELS
-    currentKWOut = 0.0;
-    energySumOut = 0.0;
-
-    // Sum the puppies to make channel number 7,
-    // channel 7 = Channel 1 - ( Channels 2 thru 6)
-    // Because this is a computer, we use 0 instead of 1...
-
-    for (int channel = 1; channel < CHANNELS; channel++) {
-
-        currentKWOut += watts[channel];
-        energySumOut += energySum[channel];
-    }
-
-    currentKWOut = watts[0] - currentKWOut;
-    energySumOut = energySum[0] - energySumOut;
-
-    // Sanitisation
-
-    if (currentKWOut < 0.0) {
-        currentKWOut = 0;
-        energySumOut = 0;
-    }
-
-    globalString += "(p_7 ";
-    globalString += currentKWOut;
-    globalString += ")";
-
-    globalString += "(e_7 ";
-    globalString += energySumOut;
-    globalString += ")";
-#endif
+    #endif
+    
     sendMessage(globalString);
 
     // Lets reseet the output arrays for the next time through.
@@ -972,11 +909,6 @@ void powerOutputHandler() {
         energySum[channel] = 0;
     }
 }
-
-#endif
-
-#ifdef COMMANDABLE
-
 
 /* -------------------------------------------------------------------------- */
 /*
@@ -996,7 +928,7 @@ void serialHandlerInitialize(void) {
 }
 
 void serialHandler(void) {
-    static char buffer[32];
+    static char buffer[64];
     static byte length = 0;
     static long timeOut = 0;
 
@@ -1026,6 +958,9 @@ void serialHandler(void) {
                 //      sendMessage("(error bufferOverflow)");
                 length = 0;
             } else if (ch == '\n' || ch == ';') {
+                // Serial.print("Hot in from the buffer: ");
+                Serial.println(buffer);
+                
                 buffer[length] = '\0'; // TODO: Check this working correctly, seems to be some problems when command is longer than buffer length ?!?
                 parseCommand(buffer);
                 length = 0;
@@ -1050,7 +985,7 @@ void parseCommand(char* buffer) {
             Serial.println(chop_string(commandArray[index].head(), commandArray[index].size()));
             Serial.println("Done chop testing-----");
         }
-     */
+    */ 
     if (commandArray[0].isEqualTo(nodeName)) {
         // Serial.println("...we have a node winner!");
 
@@ -1146,7 +1081,7 @@ void relayCommand(void) {
         //  Rebroadcast the command and check at the start wether it's for this node.
         //  sendMessage("(error parameterInvalid)");
     }
-    completeRelayCommand();
+   completeRelayCommand();
 }
 
 void setRelayParameters() {
@@ -1190,6 +1125,7 @@ void setRelayParameters() {
                 break;
 
             case 3:
+            
                 seg_command_id = choppd;
                 break;
             default:
@@ -1244,7 +1180,7 @@ void oneShotHandler(void) {
 void turnRelayOff(void) {
 
     digitalWrite(PIN_RELAY, LOW);
-    relayMessager("(relay off)");
+    relayMessager("relay off");
 }
 
 /* --------------------------------------------------------------------------
@@ -1281,7 +1217,6 @@ void relayMessager(char* message) {
     sendMessage(globalString);
 }
 
-#endif
 
 /* --------------------------------------------------------------------------
  ** Voltage Sensor
@@ -1481,18 +1416,6 @@ void baudRateCommand(void) {
     char* parameterString = parameter.head();
 }
 
-/* --------------------------------------------------------------------------
- ** Transmit rate command
- */
-
-int transmitRate = DEFAULT_TRANSMIT_RATE; // seconds
-
-void transmitRateCommand(void) {
-
-    char* parameterString = parameter.head();
-}
-
-
 /* -------------------------------------------------------------------------- */
 
 #ifdef HAS_SERIAL_MIRROR
@@ -1568,8 +1491,3 @@ void serialMirrorHandler(void) {
     }
 }
 #endif
-
-
-
-
-
