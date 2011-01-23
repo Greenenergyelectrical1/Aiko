@@ -6,7 +6,7 @@
 -- Copyright (c) 2009 by Geekscape Pty. Ltd.
 -- Documentation:  http://groups.google.com/group/aiko-platform
 -- License: GPLv3. http://geekscape.org/static/arduino_license.html
--- Version: 0.3
+-- Version: 0.4
 -- ------------------------------------------------------------------------- --
 -- See Google Docs: "Project: Aiko: Stream protocol specification"
 -- Currently requires an Aiko Gateway (indirect mode only).
@@ -248,6 +248,7 @@ function send_message(message)
 
   local http = require("socket.http")
   local response = {}
+  local process_this = true
 
   if (send_message_disabled) then
     return
@@ -257,110 +258,144 @@ function send_message(message)
     print("-- send_message(): start")
   end
 
-  --local body, code, headers, status = http.request(url, "keyword=value")
+  if (command_debug) then
+    -- print(" ")
+    -- print("The last message sent to SEG: ", last_message)
+    -- print("...and this message is:       ", message)
+  end
 
-  local body, code, headers, status = http.request {
-    url = url,
-    method = method,
-    headers = {
-      ["content-length"] = message:len(),
-      ["content-type"]   = content_type
-    },
-    --  source = ltn12.source.file(io.open(file_name, "r")),
-    source = ltn12.source.string(message),
-    --  sink = ltn12.sink.file(io.stdout)
-    sink = ltn12.sink.table(response)
-    --  sink = custom_sink()
-  }
-
-  if (body == nil) then
-    print("Error: ", code)
-  else
-    if (debug) then
-      -- TODO: Check status code is either success versus fail
-      print("Body:     ", body)  -- Will equal "1", should a generic method be used
-      print("Code:     ", code)
-      print("Headers:  ", table_to_string(headers))
-      print("Status:   ", status)
-      print("Response: ", table_to_string(response))
+  if (message == last_message) then
+    -- Check the message is a command response
+    for message in message:gmatch("command") do
+      if (command_debug) then
+        print("Found command message for supression: ", message)
+      end
+      process_this = false
     end
   end
 
-  if (response == nil) then
-    print("Error: No HTTP response body")
-  else
+  if (process_this) then
 
-    response = table.concat(response)
-    -- print("-- The fresh SEG response: ", response)
+    if (command_debug) then
+      print("Message about to be sent to SEG: ", message)
+    end
 
-    if (response:sub(1, 6) == "(node ") then
+    --local body, code, headers, status = http.request(url, "keyword=value")
+
+    local body, code, headers, status = http.request {
+      url = url,
+      method = method,
+      headers = {
+        ["content-length"] = message:len(),
+        ["content-type"]   = content_type
+      },
+      --  source = ltn12.source.file(io.open(file_name, "r")),
+      source = ltn12.source.string(message),
+      --  sink = ltn12.sink.file(io.stdout)
+      sink = ltn12.sink.table(response)
+      --  sink = custom_sink()
+    }
+
+    if (body == nil) then
+      print("Response body from SEG was nil: ", code)
+    else
       if (debug) then
-        print("-- SEG node command received: ", response)
+        -- TODO: Check status code is either success versus fail
+        print("Body:     ", body)  -- Will equal "1", should a generic method be used
+        print("Code:     ", code)
+        print("Headers:  ", table_to_string(headers))
+        print("Status:   ", status)
+        print("Response: ", table_to_string(response))
       end
-      -- print("-- The command received from SEG: ", response)
+    end
 
-      -- example command (node (segmeter (relay on 0 7734)))
+    if (response == nil) then
+      print("Error: No HTTP response body")
+    else
 
-      local start = 7
-      local finish = nil
+      response = table.concat(response)
+      -- print("-- The fresh SEG response: ", response)
 
-      finish = response:find("\n", 1, PLAIN)
+      if (response:sub(1, 6) == "(node ") then
 
-      -- print("Found the finish at: ", finish)
-
-      if (finish ~= nil) then
-        -- only want to send so trim it lke so (segmeter (relay on 0 7734))
-
-        local command = nil
-        command = response:sub(start, finish - 1)
-        -- print("mesage response sub is: ", message )
-
-        if (command) then
-          -- print ("The command about to be sent: ", command)
-          -- command = "(segmeter (relay on 0 7734))"
-          -- command = "(segmeter (relay on 0 7734))"
-          print ("SEG command sending now: ", command)
-          if (debug) then
-            print("-- send message(): command: ", command)
-          end
-
-          serial_client:send(command .. ";\n")
-          command = ""
+        if (command_debug) then
+          print("-------------------------------------------------------")
+          print("A command just in from SEG: ", response)
         end
-      else
-        -- print("Fail on finding the command start and finish")
+
+        -- an example command: (node (segmeter (relay on 0 7734)))
+
+        local start = 7
+        local finish = nil
+
+        finish = response:find("\n", 1, PLAIN)
+
+        -- print("Found the finish at: ", finish)
+
+        if (finish ~= nil) then
+          -- only want to send so trim it lke so (segmeter (relay on 0 7734))
+
+          local command = nil
+          command = response:sub(start, finish - 1)
+          -- print("mesage response sub is: ", message )
+
+          if (command) then
+            if (command_debug) then
+              -- command = "(segmeter (relay on 0 7734))"
+              print ("The SEG command about to be sent to the device: ", command)
+              print(" ")
+              print(" ")
+            end
+
+            if (debug) then
+              print("-- send message(): command: ", command)
+            end
+
+            serial_client:send(command .. ";\n")
+            command = ""
+          end
+        else
+          -- print("Fail on finding the command start and finish")
+        end
+      end
+
+      -- Check response wrapped by site command, e..g (site= new_site_token)
+      if (response:sub(1, 7) == "(site= ") then
+        local start, finish = response:find("\n", 1, PLAIN)
+        local message = response:sub(1, start - 1)
+        response = response:sub(finish + 1)
+
+        -- Parse and save new site token
+        save_site_token(message:sub(8, -2))
+        if (debug) then
+          print("-- parse_message(): new site token: " .. site_token)
+        end
+      end
+
+      -- Misc outputing
+
+      -- if (response == "(status okay)") then
+      --   if (debug) then
+      --     print("-- send_message(): status: okay")
+      --   end
+      -- else
+
+      -- This is to back off on the no site token situation
+      if (response:find("no_site_token", 1, PLAIN)) then
+        if (debug) then
+          print("-- Initiating back off on the discovery timeout")
+        end
+        site_discovery_timeout()
       end
     end
-
-    -- Check response wrapped by site command, e..g (site= new_site_token)
-    if (response:sub(1, 7) == "(site= ") then
-      local start, finish = response:find("\n", 1, PLAIN)
-      local message = response:sub(1, start - 1)
-      response = response:sub(finish + 1)
-
-      -- Parse and save new site token
-      save_site_token(message:sub(8, -2))
-      if (debug) then
-        print("-- parse_message(): new site token: " .. site_token)
-      end
+  else
+    if (command_debug) then
+      print("Skipping this duplicate command response message!")
     end
+  end  -- the last duplicate message check
 
-    -- Misc outputing
-
-    -- if (response == "(status okay)") then
-    --   if (debug) then
-    --     print("-- send_message(): status: okay")
-    --   end
-    -- else
-
-    -- This is to back off on the no site token situation
-    if (response:find("no_site_token", 1, PLAIN)) then
-      if (debug) then
-        print("-- Initiating back off on the discovery timeout")
-      end
-      site_discovery_timeout()
-    end
-  end
+  -- Setup the last message for the next time around.
+  last_message = message
 
   if (debug) then print("-- send_message(): end") end
 end
@@ -370,7 +405,7 @@ end
 function send_event_boot(node_name)
   if (debug) then print("-- send_event_boot(): " .. node_name) end
 
-  message = "(status boot 0.3)"
+  message = "(status boot 0.4)"
   send_message(wrap_message(message, node_name))
 end
 
@@ -468,6 +503,7 @@ function serial_handler()
   local stream, status, partial
 
   local this_message = nil
+
   local message = nil
   local joined_message = nil
   local attempt = 0
@@ -512,7 +548,7 @@ function serial_handler()
               joined_message = nil
               attempt = 0
             else
-              if (debug) then
+              if (special_debug) then
                 print("Still some joining work to make win: ", joined_message)
               end
             end
@@ -527,6 +563,7 @@ function serial_handler()
         if (this_message ~= nil) then
           parse_message(this_message)
         end
+        
       end -- the gmatch check
     end
 
@@ -589,8 +626,6 @@ end
 function parse_message(buffer)
   if (debug) then print("-- parse_message(): start") end
 
-  local last_message = nil
-
   -- Parse individual Aiko-Node messages, delimited by "carriage return"
 
   for message in buffer:gmatch("[^\r\n]+") do
@@ -627,13 +662,8 @@ function parse_message(buffer)
               message = message:sub(finish + 2, -2)
               if (debug) then print("-- parse_message(): event: ", message) end
 
-              if (message ~= last_message) then
-                send_message(wrap_message(message, node_name))
-              else
-                if (debug) then print("-- message duplicate ignored: ", message) end
-              end  -- end the duplicate message check
+              send_message(wrap_message(message, node_name))
 
-              last_message = message
             else
               print("-- parse_message(): ERROR: Problem after the node name")
             end
@@ -652,7 +682,9 @@ end
 function initialize()
   PLAIN = 1  -- string.find() pattern matching off
 
-  special_debug = true
+  special_debug = false
+  command_debug = true
+  last_message = ""
 
   use_production_server()   -- Smart Energy Groups web service
 --use_development_server()  -- Some development server
@@ -661,7 +693,7 @@ end
 
 -- ------------------------------------------------------------------------- --
 
-print("[Aiko-Gateway V0.4 2010-11-28]")
+print("[Aiko-Gateway V0.4 2010-12-28]")
 
 if (not is_production()) then require("luarocks.require") end
 require("socket")
