@@ -63,6 +63,7 @@ They are:
 NewSoftSerial
 PString
 OneWire
+DallasTemperature
 
 Whilst it's possible to search for these resources in the intertubes, 
 they have been packaged up here for your benifit.
